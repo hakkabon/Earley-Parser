@@ -2,6 +2,12 @@
 
 A Swift implementation of the Earley parsing algorithm with full support for ambiguous grammars, nullable productions, and left/right recursion. The parser produces a **Shared Packed Parse Forest (SPPF)** that compactly represents all possible parse trees for an input string, including all derivations for ambiguous grammars.
 
+[![Swift 5.9+](https://img.shields.io/badge/Swift-5.9%2B-orange.svg)](https://swift.org)  
+[![Platforms](https://img.shields.io/badge/platforms-macOS%2011%20%7C%20iOS%2014-blue.svg)](https://developer.apple.com/swift/)  
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)  
+
+---
+
 ## Features
 
 - Handles **all context-free grammars** — ambiguous, left-recursive, right-recursive, and grammars with nullable (ε) productions
@@ -13,6 +19,8 @@ A Swift implementation of the Earley parsing algorithm with full support for amb
 - Performs **Reachability & Productivity garbage collection** on the SPPF to eliminate dead-end states
 - Graphviz DOT output for visualising the SPPF
 - Command-line tool (`gtool`) for interactive grammar exploration
+
+---
 
 ## Theoretical Background
 
@@ -33,19 +41,19 @@ The Earley algorithm processes an input string of length *n* by maintaining *n+1
 
 Three operations drive the algorithm:
 
-| Operation | Trigger | Action |
-|-----------|---------|--------|
-| **Predictor** | Item `(X ::= α·Yβ, i)` — dot before non-terminal Y | Add `(Y ::= ·γ, j)` to S[j] for every production `Y ::= γ`. Predicts immediate completion (Aycock & Horspool style) if Y is nullable. |
-| **Scanner** | Item `(X ::= α·bβ, i)` — dot before terminal b | If input[j] = b, add `(X ::= αb·β, i)` to S[j+1] |
-| **Completer** | Item `(X ::= α·, i)` — completed | For every `(Y ::= δ·Xμ, k)` in S[i], add `(Y ::= δX·μ, k)` to S[j] |
+| Operation | Trigger | Action |  
+|-----------|---------|--------|  
+| **Predictor** | Item `(X ::= α·Yβ, i)` — dot before non-terminal Y | Add `(Y ::= ·γ, j)` to S[j] for every production `Y ::= γ`. Predicts immediate completion (Aycock & Horspool style) if Y is nullable. |  
+| **Scanner** | Item `(X ::= α·bβ, i)` — dot before terminal b | If input[j] = b, add `(X ::= αb·β, i)` to S[j+1] |  
+| **Completer** | Item `(X ::= α·, i)` — completed | For every `(Y ::= δ·Xμ, k)` in S[i], add `(Y ::= δX·μ, k)` to S[j] |  
 
 ### BSR Set
 
 Rather than building a parse forest directly during recognition, the parser records **BSR tuples** ϒ. Each tuple encodes one derivation step:
 
 ```
-(X ::= αβ, i, k, j)   — pnode: complete derivation of X from i to j, split at k
-(α,         i, k, j)   — snode: intermediate left-spine derivation of α from i to j, split at k
+(X ::= αβ, i, k, j)   — pnode: complete derivation of X from i to j, split at k  
+(α, i, k, j)          — snode: intermediate left-spine derivation of α from i to j, split at k  
 ```
 
 The BSR rules (Scott et al. Algorithm 1) are:
@@ -121,6 +129,8 @@ Tests/
     Earley_ParserTests.swift      — Test suite
 ```
 
+---
+
 ## Usage
 
 ### As a Library
@@ -180,12 +190,12 @@ swift build -c release
 
 ## SPPF Node Types
 
-| Node type | Description | Identity |
-|-----------|-------------|----------|
-| `symbol(label, i, j)` | Non-terminal X spanning input[i..j] | (label, i, j) |
-| `leaf(label, i, j)` | Terminal or ε spanning input[i..j] | (label, i, j) |
-| `intermediate(label, i, j)` | Partial derivation `X ::= α·δ` spanning (i, j) | (label, i, j) |
-| `packed(label, i, j, k)` | One specific production application for `(i, j)` with pivot k | (label, i, j, k) |
+| Node type | Description | Identity |  
+|-----------|-------------|----------|  
+| `symbol(label, i, j)` | Non-terminal X spanning input[i..j] | (label, i, j) |  
+| `leaf(label, i, j)` | Terminal or ε spanning input[i..j] | (label, i, j) |  
+| `intermediate(label, i, j)` | Partial derivation `X ::= α·δ` spanning (i, j) | (label, i, j) |  
+| `packed(label, i, j, k)` | One specific production application for `(i, j)` with pivot k | (label, i, j, k) |  
 
 ---
 
@@ -199,15 +209,17 @@ The test suite covers:
 
 | Suite | What it tests |
 |-------|---------------|
-| `Arithmetic Grammar` | Successful parses, SPPF root node, error handling |
-| `Nullable Productions` | ε rules, partial nullable inputs, empty string |
-| `Ambiguous Grammar` | Ambiguity detection, multiple BSR entries |
-| `Left-Recursive Grammar` | Lists of varying length |
-| `Right-Recursive Grammar` | Right-recursive sequences |
-| `Parse Tree Extraction` | Internal `EarleyParseTree` count, root symbol |
-| `BSR Correctness` | Start symbol coverage, extent consistency, failure case |
-| `SPPF Structural Invariants` | Symbol→packed children, packed ≤ 2 children, no extendable nodes remain |
-| `Deterministic and General Syntax Tree Extraction` | `syntaxTree(for:)`, `allSyntaxTrees(for:)`, character ranges |
+| `Arithmetic Grammar` | Successful parses, SPPF root node, error handling |  
+| `Nullable Productions` | ε rules, partial nullable inputs, empty string |  
+| `Ambiguous Grammar` | Ambiguity detection, multiple BSR entries |  
+| `Left-Recursive Grammar` | Lists of varying length |  
+| `Right-Recursive Grammar` | Right-recursive sequences |  
+| `Parse Tree Extraction` | Internal `EarleyParseTree` count, root symbol |  
+| `BSR Correctness` | Start symbol coverage, extent consistency, failure case |  
+| `SPPF Structural Invariants` | Symbol→packed children, packed ≤ 2 children, no extendable nodes remain |  
+| `Deterministic and General Syntax Tree Extraction` | `syntaxTree(for:)`, `allSyntaxTrees(for:)`, character ranges |  
+
+---
 
 ## Dependencies
 
@@ -217,6 +229,8 @@ The test suite covers:
 - [TerminalColors](https://github.com/hakkabon/TerminalColors) (Coloured terminal output)
 - [swift-argument-parser](https://github.com/apple/swift-argument-parser) (CLI `gtool`)
 - [ShellOut](https://github.com/JohnSundell/ShellOut) (Shell commands)
+
+---
 
 ## License
 

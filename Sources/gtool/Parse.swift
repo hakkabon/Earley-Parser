@@ -12,7 +12,9 @@ import Grammar
 import Earley_Parser
 import ShellOut
 
-/// Parses any input sentence based on its given grammar specification.
+///  Parses any input sentence based on its given grammar specification.
+///  It renders the result as a syntax tree, a DOT parse-tree diagram,
+///  or the full SPPF graph in DOT format.
 
 extension GrammarTool {
     
