@@ -234,4 +234,4 @@ The test suite covers:
 
 ## License
 
-See [LICENSE](LICENSE).
+MIT License — see [LICENSE](LICENSE) for details.  
