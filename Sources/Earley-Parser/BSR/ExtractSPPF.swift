@@ -1,20 +1,28 @@
 //
 //  ExtractSPPF.swift
-//  grammar
+//  Earley-Parser
 //
 //  Created by Ulf Akerstedt-Inoue on 2025/08/23.
 //  Copyright © 2025 hakkabon software. All rights reserved.
-//
-//  Revised to correctly implement the SPPF extraction algorithm from:
-//  E. Scott, A. Johnstone, L. van Binsbergen,
-//  "Derivation representation using binary subtree sets",
-//  Science of Computer Programming 175 (2019) 63–84, §3.2.
 //
 
 import Foundation
 import Grammar
 import Tokenizer
 import OSLog
+
+///  Revised to correctly implement the SPPF extraction algorithm from:
+///  E. Scott, A. Johnstone, L. van Binsbergen, "Derivation representation using binary subtree sets",
+///  Science of Computer Programming 175 (2019) 63–84, §3.2.
+///
+/// The BSR tuple encodes a derivation step for item `X ::= α·β` spanning `(leftExtent, rightExtent)`
+/// with pivot `pivot` (the boundary between α and the last symbol of α).
+///
+/// Rules (from Scott et al. §3.1):
+///   - If β = ε  (item is complete):  add pnode (X ::= αβ, i, k, j)
+///   - If |α| > 1 (intermediate):     add snode (α, i, k, j)
+///   - If |α| = 1 (single-symbol α):  add pnode (X ::= αβ, i, k, j)
+///   - If |α| = 0 (dot at start):     nothing to record
 
 extension EarleyParser {
 
@@ -25,7 +33,7 @@ extension EarleyParser {
     ///   2. While G has an extendable leaf node w = (μ, i, j):
     ///      - If μ is a non-terminal X: expand using all (X ::= γ, i, k, j) ∈ ϒ.
     ///      - If μ is an intermediate label X ::= α·δ: expand using BSR snodes for α.
-    func extractSPPF(tokens: [Token], bsr: Set<BinarySubtreeRepresentation>) -> SPPFGraph {
+    func extractSPPF(tokens: [Token], bsr: Set<BSR>) -> SPPFGraph {
         let graph = SPPFGraph()
         let startSymbol = grammar.start.name
         let n = tokens.count
@@ -46,7 +54,7 @@ extension EarleyParser {
         }
 
         // Create the root symbol node (S, 0, n).
-        let rootNode = GraphNode.symbol(label: startSymbol, leftExtent: 0, rightExtent: n)
+        let rootNode = SPPFNode.symbol(label: startSymbol, leftExtent: 0, rightExtent: n)
         graph.add(rootNode)
         Logger.sppf.trace("root node: (\(startSymbol), 0, \(n))")
 
@@ -54,7 +62,7 @@ extension EarleyParser {
         // An extendable node is a symbol or intermediate node with no children yet.
         var iterations = 0
         let maxIterations = bsr.count * 4 + 10  // safety bound
-        var expandedNodes = Set<GraphNode>()
+        var expandedNodes = Set<SPPFNode>()
 
         while iterations < maxIterations {
             let extendableNodes = graph.getExtendableNodes().filter { !expandedNodes.contains($0) }
@@ -96,8 +104,8 @@ extension EarleyParser {
     ///
     /// For each (X ::= γ, i, k, j) ∈ ϒ, call mkPN(X ::= γ·, i, k, j, G).
     private func expandSymbolNode(label: String, leftExtent: Int, rightExtent: Int,
-                                   node: GraphNode, in graph: SPPFGraph,
-                                   bsr: Set<BinarySubtreeRepresentation>) {
+                                   node: SPPFNode, in graph: SPPFGraph,
+                                   bsr: Set<BSR>) {
         // Find all (X ::= γ, i, k, j) ∈ ϒ — must match label AND extents.
         let relevantEntries = bsr.filter { entry in
             guard case let .pnode(pn) = entry.node else { return false }
@@ -128,8 +136,8 @@ extension EarleyParser {
     ///   - If |α| = 1: call mkPN(X ::= α·δ, i, i, j, G)  [pivot = leftExtent]
     ///   - If |α| > 1: for each (α, i, k, j) ∈ ϒ, call mkPN(X ::= α·δ, i, k, j, G)
     private func expandIntermediateNode(label: NodeLabel, leftExtent: Int, rightExtent: Int,
-                                         node: GraphNode, in graph: SPPFGraph,
-                                         bsr: Set<BinarySubtreeRepresentation>) {
+                                         node: SPPFNode, in graph: SPPFGraph,
+                                         bsr: Set<BSR>) {
         let alpha = Array(label.symbols.prefix(label.position))
 
         if alpha.count == 1 {
@@ -182,9 +190,9 @@ extension EarleyParser {
     ///       - If |α| > 2: intermediate node (X ::= β·xδ, i, k), where α = βx.
     ///   - If α = ε: epsilon leaf node.
     private func makePackedNode(label: NodeLabel, leftExtent: Int, pivot: Int, rightExtent: Int,
-                                 parent: GraphNode, in graph: SPPFGraph,
-                                 bsr: Set<BinarySubtreeRepresentation>) {
-        let packedNode = GraphNode.packed(label: label, leftExtent: leftExtent, rightExtent: rightExtent, pivot: pivot)
+                                 parent: SPPFNode, in graph: SPPFGraph,
+                                 bsr: Set<BSR>) {
+        let packedNode = SPPFNode.packed(label: label, leftExtent: leftExtent, rightExtent: rightExtent, pivot: pivot)
 
         // Connect parent → packed node (idempotent — addEdge checks for duplicates).
         graph.addEdge(from: parent, to: packedNode)
@@ -194,7 +202,7 @@ extension EarleyParser {
 
         // α = ε: epsilon production — attach a single epsilon leaf.
         if alpha.isEmpty {
-            let epsNode = GraphNode.leaf(label: MetaTerminal.eps.rawValue,
+            let epsNode = SPPFNode.leaf(label: MetaTerminal.eps.rawValue,
                                          leftExtent: leftExtent, rightExtent: rightExtent)
             graph.addEdge(from: packedNode, to: epsNode)
             Logger.sppf.trace("    \(packedNode) -> \(epsNode) [ε]")
@@ -224,7 +232,7 @@ extension EarleyParser {
                 symbols: label.symbols,
                 position: label.position - 1   // dot moves one step left: α·δ → β·xδ
             )
-            let leftChild = GraphNode.intermediate(
+            let leftChild = SPPFNode.intermediate(
                 label: intermediateLabel,
                 leftExtent: leftExtent,
                 rightExtent: pivot
@@ -236,14 +244,14 @@ extension EarleyParser {
 
     // MARK: - Helper
 
-    private func createNodeForSymbol(_ symbol: Symbol, leftExtent: Int, rightExtent: Int) -> GraphNode {
+    private func createNodeForSymbol(_ symbol: Symbol, leftExtent: Int, rightExtent: Int) -> SPPFNode {
         switch symbol {
         case .terminal(let t):
-            return GraphNode.leaf(label: t.description, leftExtent: leftExtent, rightExtent: rightExtent)
+            return SPPFNode.leaf(label: t.description, leftExtent: leftExtent, rightExtent: rightExtent)
         case .nonTerminal(let nt):
-            return GraphNode.symbol(label: nt.name, leftExtent: leftExtent, rightExtent: rightExtent)
+            return SPPFNode.symbol(label: nt.name, leftExtent: leftExtent, rightExtent: rightExtent)
         case .metaSymbol(let meta):
-            return GraphNode.leaf(label: meta.description, leftExtent: leftExtent, rightExtent: rightExtent)
+            return SPPFNode.leaf(label: meta.description, leftExtent: leftExtent, rightExtent: rightExtent)
         }
     }
 }

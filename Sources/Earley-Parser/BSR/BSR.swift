@@ -1,6 +1,6 @@
 //
 //  BSR.swift
-//  Grammar
+//  Earley-Parser
 //
 //  Created by Ulf Akerstedt-Inoue on 2024/08/15.
 //  Copyright © 2020 hakkabon software. All rights reserved.
@@ -13,14 +13,14 @@ import OSLog
 /// Binary Subtree Representation (BSR).
 /// - Derivation representation using binary subtree sets, E. Scott et al.
 ///
-public struct BinarySubtreeRepresentation: Codable {
+public struct BSR: Codable {
     let node: BinarySubtreeNode
     let leftExtent: Int
     let pivot: Int
     let rightExtent: Int
 }
 
-extension BinarySubtreeRepresentation: CustomStringConvertible{
+extension BSR: CustomStringConvertible{
     public var description: String {
         switch self.node {
         case let .snode(node):
@@ -31,8 +31,8 @@ extension BinarySubtreeRepresentation: CustomStringConvertible{
     }
 }
 
-extension BinarySubtreeRepresentation: Comparable {
-    public static func < (lhs: BinarySubtreeRepresentation, rhs: BinarySubtreeRepresentation) -> Bool {
+extension BSR: Comparable {
+    public static func < (lhs: BSR, rhs: BSR) -> Bool {
         // First compare by type
         let lhsType = lhs.typeOrder
         let rhsType = rhs.typeOrder
@@ -69,7 +69,7 @@ extension BinarySubtreeRepresentation: Comparable {
     }
 }
 
-extension BinarySubtreeRepresentation: Hashable {
+extension BSR: Hashable {
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(node)
@@ -79,9 +79,9 @@ extension BinarySubtreeRepresentation: Hashable {
     }
 }
 
-extension BinarySubtreeRepresentation: Equatable {
+extension BSR: Equatable {
 
-    public static func == (lhs: BinarySubtreeRepresentation, rhs: BinarySubtreeRepresentation) -> Bool {
+    public static func == (lhs: BSR, rhs: BSR) -> Bool {
         return lhs.node == rhs.node &&
         lhs.leftExtent == rhs.leftExtent &&
         lhs.pivot == rhs.pivot &&
@@ -187,7 +187,7 @@ extension SymbolNode: Equatable {
 
 
 
-extension Set<BinarySubtreeRepresentation> {
+extension Set<BSR> {
     
     public func log() {
         Logger.bsr.trace("Binary Subtree Representation \n")

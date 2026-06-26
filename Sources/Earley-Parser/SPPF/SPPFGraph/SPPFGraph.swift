@@ -1,6 +1,6 @@
 //
 //  ExtractSPPF.swift
-//  grammar
+//  Earley-Parser
 //
 //  Created by Ulf Akerstedt-Inoue on 2025/08/23.
 //  Copyright © 2025 hakkabon software. All rights reserved.
@@ -10,30 +10,30 @@ import Foundation
 import OSLog
 
 public class SPPFGraph {
-    private var graph: [GraphNode: Set<GraphNode>] = [:]
+    private var graph: [SPPFNode: Set<SPPFNode>] = [:]
     
     /// Add a node to the graph.
     /// - parameter node: The node to be added.
-    func add(_ node: GraphNode) {
+    func add(_ node: SPPFNode) {
         guard graph.index(forKey: node) == nil else { return }
         graph[node] = []
     }
     
-    func addEdge(from parent: GraphNode, to child: GraphNode) {
+    func addEdge(from parent: SPPFNode, to child: SPPFNode) {
         graph[parent, default: []].insert(child)
         add(child)
     }
     
-    func getChildren(of node: GraphNode) -> Set<GraphNode> {
+    func getChildren(of node: SPPFNode) -> Set<SPPFNode> {
         return graph[node] ?? Set()
     }
     
-    func getAllNodes() -> [GraphNode] {
+    func getAllNodes() -> [SPPFNode] {
         return Array(graph.keys)
     }
 
     // Get nodes that can be expanded (non-terminals and intermediates not yet processed)
-    func getExtendableNodes() -> [GraphNode] {
+    func getExtendableNodes() -> [SPPFNode] {
         graph.keys.filter { node in
             switch node {
             case .leaf(_,_,_):
@@ -62,7 +62,7 @@ public class SPPFGraph {
     }
     
     func cleanup() {
-        var productive = Set<GraphNode>()
+        var productive = Set<SPPFNode>()
         
         for node in graph.keys {
             if case .leaf = node {
@@ -95,7 +95,7 @@ public class SPPFGraph {
             }
         }
         
-        var newGraph: [GraphNode: Set<GraphNode>] = [:]
+        var newGraph: [SPPFNode: Set<SPPFNode>] = [:]
         for (node, children) in graph {
             if productive.contains(node) {
                 let productiveChildren = children.filter { productive.contains($0) }

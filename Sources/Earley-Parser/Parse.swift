@@ -1,6 +1,6 @@
 //
-//  EarleyParserParse.swift
-//  Grammar
+//  Parse.swift
+//  Earley-Parser
 //
 //  Created by Ulf Akerstedt-Inoue on 2024/02/18.
 //  Copyright © 2025 hakkabon software. All rights reserved.
@@ -16,93 +16,6 @@ let symbols = [
     ">", "{", "[", "<", "(", "!", "*", "|", "+", "-", "/", "'", "}", "]", ")", ";", "?", "#"
 ]
 //let keywords: [String] = []
-
-extension EarleyParser: DeterministicParser {
-    
-    public func syntaxTree(for string: String) throws -> ParseTree {
-        let result = try parse(string)
-        guard result.isSuccessful, let sppf = result.sppfGraph else {
-            throw SyntaxError(range: string.startIndex..<string.endIndex, in: string, reason: .unmatchedPattern)
-        }
-        
-        let inputTokens = Tokenizer(string, symbols: Set(symbols), keywords: Set([])).tokenize()
-        Thread.current.threadDictionary["EarleyParserTokens"] = inputTokens
-        Thread.current.threadDictionary["EarleyParserString"] = string
-        defer {
-            Thread.current.threadDictionary.removeObject(forKey: "EarleyParserTokens")
-            Thread.current.threadDictionary.removeObject(forKey: "EarleyParserString")
-        }
-        
-        let tree = buildParseTree(bsr: result.bsr, sppf: sppf)
-        if case .empty = tree {
-            throw SyntaxError(range: string.startIndex..<string.endIndex, in: string, reason: .unmatchedPattern)
-        }
-        return tree
-    }
-}
-
-extension EarleyParser {
-     
-    public func allSyntaxTrees(for string: String) throws -> [ParseTree] {
-        let result = try parse(string)
-        guard result.isSuccessful, let sppf = result.sppfGraph else {
-            throw SyntaxError(range: string.startIndex..<string.endIndex, in: string, reason: .unmatchedPattern)
-        }
-        
-        let inputTokens = Tokenizer(string, symbols: Set(symbols), keywords: Set([])).tokenize()
-        Thread.current.threadDictionary["EarleyParserTokens"] = inputTokens
-        Thread.current.threadDictionary["EarleyParserString"] = string
-        defer {
-            Thread.current.threadDictionary.removeObject(forKey: "EarleyParserTokens")
-            Thread.current.threadDictionary.removeObject(forKey: "EarleyParserString")
-        }
-        
-        let trees = buildAllParseTrees(sppf: sppf)
-        if trees.isEmpty {
-            throw SyntaxError(range: string.startIndex..<string.endIndex, in: string, reason: .unmatchedPattern)
-        }
-        return trees
-    }
-
-    // MARK: - SyntaxTree construction helpers
-
-    private func buildParseTree(bsr: Set<BinarySubtreeRepresentation>, sppf: SPPFGraph) -> ParseTree {
-        return buildAllParseTrees(sppf: sppf).first ?? .empty
-    }
-
-    private func buildAllParseTrees(sppf: SPPFGraph) -> [ParseTree] {
-        guard let tokens = Thread.current.threadDictionary["EarleyParserTokens"] as? [Token],
-              let string = Thread.current.threadDictionary["EarleyParserString"] as? String else {
-            return []
-        }
-
-        let n = tokens.count
-        let startSymbol = grammar.start.name
-
-        let rootNodes = sppf.getAllNodes().filter { node in
-            if case let .symbol(label, leftExtent, rightExtent) = node {
-                return label == startSymbol && leftExtent == 0 && rightExtent == n
-            }
-            return false
-        }
-
-        var allTrees: [ParseTree] = []
-        for rootNode in rootNodes {
-            // Fresh memo table per root: avoids cross-root contamination while still
-            // sharing memoised sub-results within a single root's sub-forest.
-            var memo: [GraphNode: [[ParseTree]]?] = [:]
-            let alts = extractNodeAlternatives(
-                node: rootNode, sppf: sppf,
-                tokens: tokens, string: string, memo: &memo)
-            for alt in alts {
-                if let first = alt.first {
-                    allTrees.append(first)
-                }
-            }
-        }
-        return deduplicateParseTrees(allTrees)
-    }
-}
 
 extension EarleyParser: GeneralizedParser {
 
@@ -131,7 +44,7 @@ extension EarleyParser: GeneralizedParser {
         var stateCollection: [Set<ParseStateItem>] = [initState]
         stateCollection.reserveCapacity(inputTokens.count + 1)
 
-        var bsrSet = Set<BinarySubtreeRepresentation>(bsr)
+        var bsrSet = Set<BSR>(bsr)
 
         var currentIndex: String.Index = string.startIndex
 
@@ -141,7 +54,7 @@ extension EarleyParser: GeneralizedParser {
             // Collect all terminals which could occur at the current location according to the grammar
             // From `lastState` (last parse state), collect all `ParseStateItems` which have a terminal symbol
             // as their next symbol by peeking at the lookahead of the earley item.
-            let newItems: (setItems: Set<ParseStateItem>, terminal: Terminal, range: Range<String.Index>, bsr: Set<BinarySubtreeRepresentation>)? = {
+            let newItems: (setItems: Set<ParseStateItem>, terminal: Terminal, range: Range<String.Index>, bsr: Set<BSR>)? = {
                 let (terminal, range) = switch inputToken.type {
                 case .symbol(let token):
                     (Terminal(string: token), inputToken.range)

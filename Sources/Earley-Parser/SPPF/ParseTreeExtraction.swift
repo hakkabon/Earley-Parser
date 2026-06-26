@@ -1,6 +1,6 @@
 //
-//  EarleyParserExtractParseTree.swift
-//  grammar
+//  ParseTreeExtraction.swift
+//  Earley-Parser
 //
 //  Created by Ulf Akerstedt-Inoue on 2025/08/23.
 //  Copyright © 2025 hakkabon software. All rights reserved.
@@ -33,7 +33,7 @@ extension EarleyParser {
             if processedRoots.contains(rootKey) { continue }
             processedRoots.insert(rootKey)
             
-            var visited = Set<GraphNode>()
+            var visited = Set<SPPFNode>()
             let trees = extractTreesFromNode(rootNode, in: graph, visited: &visited)
             allTrees.append(contentsOf: trees)
         }
@@ -42,7 +42,7 @@ extension EarleyParser {
         return deduplicateTrees(allTrees)
     }
 
-    private func extractTreesFromNode(_ node: GraphNode, in graph: SPPFGraph, visited: inout Set<GraphNode>) -> [EarleyParseTree] {
+    private func extractTreesFromNode(_ node: SPPFNode, in graph: SPPFGraph, visited: inout Set<SPPFNode>) -> [EarleyParseTree] {
         if visited.contains(node) {
             return [EarleyParseTree(symbol: "<CYCLE>")]
         }
@@ -101,7 +101,7 @@ extension EarleyParser {
         }
     }
     
-    private func extractTreesFromPackedNode(_ node: GraphNode, in graph: SPPFGraph, visited: inout Set<GraphNode>) -> [EarleyParseTree] {
+    private func extractTreesFromPackedNode(_ node: SPPFNode, in graph: SPPFGraph, visited: inout Set<SPPFNode>) -> [EarleyParseTree] {
         guard case let .packed(label, _, _, _) = node else {
             return []
         }

@@ -1,6 +1,6 @@
 //
-//  SPPFAnalyze.swift
-//  Grammar
+//  AnalyzeSPPF.swift
+//  Earley-Parser
 //
 //  Created by Ulf Akerstedt-Inoue on 2025/09/23.
 //  Copyright © 2025 hakkabon software. All rights reserved.
@@ -41,10 +41,10 @@ extension SPPFGraph {
         }
         
         // Check for cycles (simplified)
-        var visited: Set<GraphNode> = []
-        var inPath: Set<GraphNode> = []
+        var visited: Set<SPPFNode> = []
+        var inPath: Set<SPPFNode> = []
         
-        func hasCycle(_ node: GraphNode) -> Bool {
+        func hasCycle(_ node: SPPFNode) -> Bool {
             if inPath.contains(node) {
                 Logger.sppf.trace("⚠️  Cycle detected at node: \(node)")
                 return true

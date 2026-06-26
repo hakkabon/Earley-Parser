@@ -1,6 +1,6 @@
 //
 //  GrammarLogger.swift
-//  Grammar
+//  Earley-Parser
 //
 //  Created by Ulf Akerstedt-Inoue on 2025/09/21.
 //  Copyright © 2025 hakkabon software. All rights reserved.

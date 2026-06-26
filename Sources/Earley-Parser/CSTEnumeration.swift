@@ -1,6 +1,6 @@
 //
 //  CSTEnumeration.swift
-//  grammar
+//  Earley-Parser
 //
 //  Created by Ulf Akerstedt-Inoue on 2026/06/03.
 //  Copyright © 2026 hakkabon software. All rights reserved.
@@ -28,11 +28,11 @@ extension EarleyParser {
     ///             the list-of-alternatives already computed for it.  A sentinel value
     ///             of `nil` indicates the node is currently being expanded (cycle guard).
     func extractNodeAlternatives(
-        node: GraphNode,
+        node: SPPFNode,
         sppf: SPPFGraph,
         tokens: [Token],
         string: String,
-        memo: inout [GraphNode: [[ParseTree]]?]
+        memo: inout [SPPFNode: [[ParseTree]]?]
     ) -> [[ParseTree]] {
 
         // --- Cycle guard / memoisation ---
@@ -52,11 +52,11 @@ extension EarleyParser {
     // MARK: - Internal expansion helpers
 
     private func _expandNode(
-        node: GraphNode,
+        node: SPPFNode,
         sppf: SPPFGraph,
         tokens: [Token],
         string: String,
-        memo: inout [GraphNode: [[ParseTree]]?]
+        memo: inout [SPPFNode: [[ParseTree]]?]
     ) -> [[ParseTree]] {
 
         switch node {
@@ -113,18 +113,18 @@ extension EarleyParser {
         leftExtent: Int,
         rightExtent: Int,
         pivot: Int,
-        node: GraphNode,
+        node: SPPFNode,
         sppf: SPPFGraph,
         tokens: [Token],
         string: String,
-        memo: inout [GraphNode: [[ParseTree]]?]
+        memo: inout [SPPFNode: [[ParseTree]]?]
     ) -> [[ParseTree]] {
 
         let children = sppf.getChildren(of: node)
         let alpha = Array(label.symbols.prefix(label.position))
 
-        var leftChild: GraphNode? = nil
-        var rightChild: GraphNode? = nil
+        var leftChild: SPPFNode? = nil
+        var rightChild: SPPFNode? = nil
 
         // Identify left / right children by their extents and symbol type.
         for child in children {
@@ -186,7 +186,7 @@ extension EarleyParser {
 
     // MARK: - Small helpers
 
-    func childExtents(_ node: GraphNode) -> (Int, Int) {
+    func childExtents(_ node: SPPFNode) -> (Int, Int) {
         switch node {
         case let .leaf(_, l, r):         return (l, r)
         case let .symbol(_, l, r):       return (l, r)
@@ -195,7 +195,7 @@ extension EarleyParser {
         }
     }
 
-    private func matchSymbol(_ symbol: Symbol, node: GraphNode) -> Bool {
+    private func matchSymbol(_ symbol: Symbol, node: SPPFNode) -> Bool {
         switch (symbol, node) {
         case (.terminal(let t),    .leaf(let label, _, _)):   return t.description == label
         case (.nonTerminal(let nt),.symbol(let label, _, _)): return nt.name == label

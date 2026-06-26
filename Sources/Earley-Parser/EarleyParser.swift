@@ -1,6 +1,6 @@
 //
 //  EarleyParser.swift
-//  Grammar
+//  Earley-Parser
 //
 //  Created by Ulf Akerstedt-Inoue on 2023/10/22.
 //  Copyright © 2015 hakkabon software. All rights reserved.
@@ -29,8 +29,6 @@ import OSLog
 ///     Electronic Notes in Theoretical Computer Science. 203 (2): 53–67. doi:10.1016/j.entcs.2008.03.044
 /// [6] E. Scott, A. Johnstone, L. van Binsbergen, Derivation representation using binary subtree sets,
 ///     Sci. Comput. Program., 175 (2019), pp. 63-84, 10.1016/j.scico.2019.01.008
-/// [7] Earley Table Traversing Parsers, May 2025Science of Computer Programming 247:103335
-///     DOI:10.1016/j.scico.2025.103335
 ///
 /// The Earley algorithm creates a syntax tree in O(n³) worst case run time.
 /// For unambiguous grammars, the run time is O(n²).
@@ -78,8 +76,8 @@ public struct EarleyParser {
     /// that can derive an empty string ε.
     /// 3. BSR Addition (for nullables): It calls bsrAdd(X ::= αY·β, i, j, j). This records a derivation step.
     /// The span is (j, j), indicating that the non-terminal Y derived the empty string at position j
-    private func predict(item: ParseStateItem, currentIndex: Int, productions: [NonTerminal: [Production]],  allStates: [Set<ParseStateItem>]) -> ([ParseStateItem], Set<BinarySubtreeRepresentation>) {
-        var bsr = Set<BinarySubtreeRepresentation>()
+    private func predict(item: ParseStateItem, currentIndex: Int, productions: [NonTerminal: [Production]],  allStates: [Set<ParseStateItem>]) -> ([ParseStateItem], Set<BSR>) {
+        var bsr = Set<BSR>()
 
         guard
 			let symbol = item.nextSymbol,
@@ -125,8 +123,8 @@ public struct EarleyParser {
     /// - i is the start index of the item.
     /// - j is the current position in the input string.
     /// The Scanner performs the following actions:
-    func scan(state: Set<ParseStateItem>, token: Terminal, currentIndex: Int) -> (Set<ParseStateItem>, Set<BinarySubtreeRepresentation>) {
-        var bsr = Set<BinarySubtreeRepresentation>()
+    func scan(state: Set<ParseStateItem>, token: Terminal, currentIndex: Int) -> (Set<ParseStateItem>, Set<BSR>) {
+        var bsr = Set<BSR>()
 		let items = state.reduce(into: Set<ParseStateItem>()) { partialResult, item in
 			guard
                 // Check that the next symbol of the production is a terminal and
@@ -167,7 +165,7 @@ public struct EarleyParser {
     /// - X ::= α· is the completed production rule. i is the start index of the substring derived by X.
     /// - j is the end index of the substring derived by X.
     /// The Completer performs the following actions:
-	private func complete(item: ParseStateItem, currentIndex: Int, allStates: [Set<ParseStateItem>]) -> ([ParseStateItem], Set<BinarySubtreeRepresentation>) {
+	private func complete(item: ParseStateItem, currentIndex: Int, allStates: [Set<ParseStateItem>]) -> ([ParseStateItem], Set<BSR>) {
 		guard item.isCompleted else {
 			return ([], [])
 		}
@@ -186,7 +184,7 @@ public struct EarleyParser {
         //   leftExtent = k  (start of the waiting item Y ::= δ·Xμ)
         //   pivot      = i  (start of the completed item X ::= α·, i.e. item.startTokenIndex)
         //   rightExtent= j  (current position)
-        var bsr = Set<BinarySubtreeRepresentation>()
+        var bsr = Set<BSR>()
         for (stateItem, advancedItem) in zip(stateItems, advancedItems) {
             if let bsrItem = bsrAdd(item: advancedItem,                     // Y ::= δX·μ
                                     leftExtent: stateItem.startTokenIndex,  // k
@@ -213,10 +211,10 @@ public struct EarleyParser {
 
     // The Completer/Predictor Loop
     // `currentIndex` is the index of the state currently being built (i.e. stateCollection.count after appending).
-    func processState(productions: [NonTerminal: [Production]], allStates: [Set<ParseStateItem>], knownItems: Set<ParseStateItem>, newItems: Set<ParseStateItem>, currentIndex: Int) -> (Set<ParseStateItem>, Set<BinarySubtreeRepresentation>) {
+    func processState(productions: [NonTerminal: [Production]], allStates: [Set<ParseStateItem>], knownItems: Set<ParseStateItem>, newItems: Set<ParseStateItem>, currentIndex: Int) -> (Set<ParseStateItem>, Set<BSR>) {
 		var addedItems: Set<ParseStateItem> = newItems
 		var knownItems: Set<ParseStateItem> = knownItems
-        var bsrSet = Set<BinarySubtreeRepresentation>()
+        var bsrSet = Set<BSR>()
 
 		repeat {
 			addedItems = addedItems.reduce(into: Set<ParseStateItem>()) { (addedItems, item) in
@@ -256,22 +254,15 @@ public struct EarleyParser {
 extension EarleyParser {
     
     /// Constructs and adds a BSR tuple to the set ϒ, following Scott et al. (2019) Algorithm 1.
-    ///
-    /// The BSR tuple encodes a derivation step for item `X ::= α·β` spanning `(leftExtent, rightExtent)`
-    /// with pivot `pivot` (the boundary between α and the last symbol of α).
-    ///
-    /// Rules (from Scott et al. §3.1):
-    ///   - If β = ε  (item is complete):  add pnode (X ::= αβ, i, k, j)
-    ///   - If |α| > 1 (intermediate):     add snode (α, i, k, j)
-    ///   - If |α| = 1 (single-symbol α):  add pnode (X ::= αβ, i, k, j)
-    ///   - If |α| = 0 (dot at start):     nothing to record
+    /// Note: Do not conflate 'generating of BSR' with with 'SPPF graph extraction from BSR'.
+    /// There were some confusing comments written here earlier.
     ///
     /// - Parameters:
     ///   - item:        The Earley item after the dot has been advanced (X ::= α·β).
     ///   - leftExtent:  i — start position of the rule X.
     ///   - pivot:       k — boundary between the left and right children.
     ///   - rightExtent: j — end position of the current derivation step.
-    private func bsrAdd(item: ParseStateItem, leftExtent: Int, pivot: Int, rightExtent: Int) -> BinarySubtreeRepresentation? {
+    private func bsrAdd(item: ParseStateItem, leftExtent: Int, pivot: Int, rightExtent: Int) -> BSR? {
         
         // Get the symbols before and after the dot: X ::= α·β
         let (alpha, beta, _) = item.split
@@ -282,7 +273,7 @@ extension EarleyParser {
         // Case 1: β = ε — completed rule.
         // Insert pnode (X ::= αβ, i, k, j) representing the full derivation of X.
         if beta.isEmpty {
-            let bsr = BinarySubtreeRepresentation(
+            let bsr = BSR(
                 node: .pnode(ProductionNode(goal: item.production.goal, symbols: item.production.rule)),
                 leftExtent: leftExtent,
                 pivot: pivot,
@@ -295,7 +286,7 @@ extension EarleyParser {
         // Case 2: |α| > 1 — intermediate derivation.
         // Insert snode (α, i, k, j) to represent the partial left spine.
         if alpha.count > 1 {
-            let bsr = BinarySubtreeRepresentation(
+            let bsr = BSR(
                 node: .snode(SymbolNode(symbols: alpha)),
                 leftExtent: leftExtent,
                 pivot: pivot,
@@ -304,18 +295,6 @@ extension EarleyParser {
             Logger.bsr.trace("add BSR snode \(bsr) [|α|>1, intermediate]")
             return bsr
         }
-
-        // Case 3: |α| = 1 — single symbol before the dot, β is non-empty.
-        // Insert pnode (X ::= αβ, i, k, j) so the SPPF builder can find this derivation step.
-        // (This is the case the original code was missing.)
-//        let bsr = BinarySubtreeRepresentation(
-//            node: .pnode(ProductionNode(goal: item.production.goal, symbols: item.production.rule)),
-//            leftExtent: leftExtent,
-//            pivot: pivot,
-//            rightExtent: rightExtent
-//        )
-//        Logger.bsr.trace("add BSR pnode \(bsr) [|α|=1, partial]")
-//        return bsr
         return nil
     }
 }

@@ -1,6 +1,6 @@
 //
 //  SPPFgraphviz.swift
-//  Grammar
+//  Earley-Parser
 //
 //  Created by Ulf Akerstedt-Inoue on 2025/09/23.
 //  Copyright © 2025 hakkabon software. All rights reserved.
@@ -21,7 +21,7 @@ extension SPPFGraph {
         
         // Get all nodes and create unique identifiers
         let allNodes = getAllNodes().sorted()
-        var nodeIds: [GraphNode: String] = [:]
+        var nodeIds: [SPPFNode: String] = [:]
         
         // Generate unique node IDs and define nodes
         for (index, node) in allNodes.enumerated() {
@@ -50,7 +50,7 @@ extension SPPFGraph {
     }
     
     /// Get visual attributes for different node types
-    private func getNodeAttributes(_ node: GraphNode) -> (label: String, shape: String, color: String, style: String) {
+    private func getNodeAttributes(_ node: SPPFNode) -> (label: String, shape: String, color: String, style: String) {
         switch node {
         case let .leaf(label, leftExtent, rightExtent):
             let strippedLabel = label.description.replacingOccurrences(of: "\"", with: "")
@@ -119,7 +119,7 @@ extension SPPFGraph {
         dot += "    edge [fontname=\"Arial\", fontsize=8];\n\n"
         
         let allNodes = getAllNodes().sorted()
-        var nodeIds: [GraphNode: String] = [:]
+        var nodeIds: [SPPFNode: String] = [:]
         
         // Group nodes by extent if clustering is enabled
         if clusterByExtent {
@@ -190,7 +190,7 @@ extension SPPFGraph {
     }
     
     /// Get detailed node attributes with more styling options
-    private func getDetailedNodeAttributes(_ node: GraphNode, showExtents: Bool) -> (label: String, shape: String, color: String, style: String) {
+    private func getDetailedNodeAttributes(_ node: SPPFNode, showExtents: Bool) -> (label: String, shape: String, color: String, style: String) {
         switch node {
         case let .leaf(label, leftExtent, rightExtent):
             let displayLabel = showExtents ? "\(label)\\n(\(leftExtent),\(rightExtent))" : label
@@ -256,7 +256,7 @@ extension SPPFGraph {
     }
     
     /// Get edge styling based on node types
-    private func getEdgeStyle(from parent: GraphNode, to child: GraphNode) -> String {
+    private func getEdgeStyle(from parent: SPPFNode, to child: SPPFNode) -> String {
         switch (parent, child) {
         case (.symbol, .packed):
             return "solid"
@@ -272,7 +272,7 @@ extension SPPFGraph {
 
 // Helper extension for GraphNode to get extents
 
-extension GraphNode {
+extension SPPFNode {
     var leftRightExtents: (Int, Int) {
         switch self {
         case let .leaf(_, leftExtent, rightExtent): return (leftExtent, rightExtent)

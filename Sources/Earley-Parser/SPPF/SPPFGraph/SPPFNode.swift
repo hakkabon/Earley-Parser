@@ -1,6 +1,6 @@
 //
 //  SPPFNode.swift
-//  Grammar
+//  Earley-Parser
 //
 //  Created by Ulf Akerstedt-Inoue on 2024/07/15.
 //  Copyright © 2020 hakkabon software. All rights reserved.
@@ -9,7 +9,7 @@
 import Foundation
 
 /// SPPF Node types following Scott & Johnstone:
-public enum GraphNode: Codable {
+public enum SPPFNode: Codable {
     /// leaf nodes: terminals and epsilon
     case leaf(label: String, leftExtent: Int, rightExtent: Int)
     /// symbol nodes: non-terminals and terminals
@@ -20,7 +20,7 @@ public enum GraphNode: Codable {
     case packed(label: NodeLabel, leftExtent: Int, rightExtent: Int, pivot: Int)
 }
 
-extension GraphNode: CustomStringConvertible {
+extension SPPFNode: CustomStringConvertible {
     
     public var description: String {
         switch self {
@@ -36,7 +36,7 @@ extension GraphNode: CustomStringConvertible {
     }
 }
 
-extension GraphNode: Hashable {
+extension SPPFNode: Hashable {
     
     public func hash(into hasher: inout Hasher) {
         switch self {
@@ -61,9 +61,9 @@ extension GraphNode: Hashable {
     }
 }
 
-extension GraphNode: Equatable {
+extension SPPFNode: Equatable {
     
-    public static func == (lhs: GraphNode, rhs: GraphNode) -> Bool {
+    public static func == (lhs: SPPFNode, rhs: SPPFNode) -> Bool {
         switch (lhs,rhs) {
         case (.leaf(_,_,_), .symbol(_,_,_)): return false
         case (.leaf(_,_,_), .intermediate(_,_,_)): return false
@@ -90,10 +90,9 @@ extension GraphNode: Equatable {
     }
 }
 
-
-extension GraphNode: Comparable {
+extension SPPFNode: Comparable {
     
-    public static func < (lhs: GraphNode, rhs: GraphNode) -> Bool {
+    public static func < (lhs: SPPFNode, rhs: SPPFNode) -> Bool {
         // First compare by type
         let lhsType = lhs.typeOrder
         let rhsType = rhs.typeOrder

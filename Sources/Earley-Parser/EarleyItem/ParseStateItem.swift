@@ -1,6 +1,6 @@
 //
 //  ParseStateItem.swift
-//  Grammar
+//  Earley-Parser
 //
 //  Created by Ulf Akerstedt-Inoue on 2024/02/18.
 //  Copyright © 2020 hakkabon software. All rights reserved.

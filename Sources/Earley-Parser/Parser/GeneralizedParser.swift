@@ -1,6 +1,6 @@
 //
 //  GeneralizedParser.swift
-//  Grammar
+//  Earley-Parser
 //
 //  Created by Ulf Akerstedt-Inoue on 2023/08/11.
 //  Copyright © 2023 hakkabon software. All rights reserved.
@@ -12,7 +12,7 @@ import Grammar
 /// The outcome of a parse attempt.
 public struct ParseResult {
     public let isSuccessful: Bool
-    public let bsr: Set<BinarySubtreeRepresentation>
+    public let bsr: Set<BSR>
     public let sppfGraph: SPPFGraph?
 
     /// Returns `true` if any non-terminal or intermediate SPPF node has more than one
