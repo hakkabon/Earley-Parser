@@ -126,6 +126,34 @@ extension EarleyParser {
                 bsr: bsr
             )
         }
+
+        // Special case — ε productions never get a BSR record. Per Scott et al. §3.1,
+        // "if |α| = 0 (dot at start), nothing to record": a completed item X ::= ε· has
+        // an empty α, so bsrAdd() deliberately omits it from ϒ (see EarleyParser.bsrAdd's
+        // `guard !alpha.isEmpty`). That means a Symbol(X, i, i) node reached through a
+        // nullable X (e.g. the right child of A ::= a·A) finds zero relevantEntries above,
+        // is left without children, and is later pruned as unproductive by graph.cleanup().
+        // Synthesize the missing derivation directly from the grammar instead of relying
+        // on ϒ to contain it.
+        if leftExtent == rightExtent {
+            // Note: a direct epsilon production is encoded here as `rule == [.terminal(.meta(.eps))]`
+            // (a one-element array), not `rule == []` — so `rule.isEmpty` would never match it.
+            // `Production.isNullable` is the correct test: it's true for both `[]` and `[ε]`.
+            let epsilonProductions = grammar.productions.filter {
+                $0.goal.name == label && $0.isNullable
+            }
+            for production in epsilonProductions {
+                makePackedNode(
+                    label: NodeLabel(goal: production.goal, symbols: production.rule, position: 0),
+                    leftExtent: leftExtent,
+                    pivot: leftExtent,
+                    rightExtent: rightExtent,
+                    parent: node,
+                    in: graph,
+                    bsr: bsr
+                )
+            }
+        }
     }
 
     // MARK: - Expand an intermediate node (μ = X ::= α·δ)
