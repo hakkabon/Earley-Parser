@@ -206,3 +206,63 @@ func scottJohnstone_parsetree_2026_1() throws {
     let parsetree = try parser.syntaxTree(for: input).mapLeafs{ String(input[$0]) }
     #expect(parsetree.root == "S")
 }
+
+// MARK: - Epsilon normalization invariants
+
+@Test("Grammar imports: epsilon 'ε' is stored as rule == [] (Scott 2008 ex.1, B ::= ε)")
+func epsilonProductionNormalized_2008_1() throws {
+    let grammar = try Grammar(bnf: ScottJohnstone2008_1, start: "S")
+    // B ::= ε must be stored as the canonical empty rule, not as [.terminal(.meta(.eps))]
+    let bEps = grammar.productions.first { $0.goal.name == "B" }
+    #expect(bEps?.rule.isEmpty == true)
+}
+
+@Test("Grammar imports: epsilon 'ε' is stored as rule == [] (Scott 2019 ex.1, A ::= ε and B ::= ε)")
+func epsilonProductionNormalized_2019_1() throws {
+    let grammar = try Grammar(bnf: ScottJohnstone2019_1, start: "S")
+    let aEps = grammar.productions.first { $0.goal.name == "A" && $0.isNullable }
+    let bEps = grammar.productions.first { $0.goal.name == "B" && $0.isNullable }
+    #expect(aEps?.rule.isEmpty == true)
+    #expect(bEps?.rule.isEmpty == true)
+}
+
+@Test("Grammar imports: epsilon 'ε' is stored as rule == [] (Scott 2026 ex.1, A ::= ε)")
+func epsilonProductionNormalized_2026_1() throws {
+    let grammar = try Grammar(bnf: ScottJohnstone2026_1, start: "S")
+    let aEps = grammar.productions.first { $0.goal.name == "A" && $0.isNullable }
+    #expect(aEps?.rule.isEmpty == true)
+}
+
+@Test("Parse succeeds on grammar that contains nullable non-terminal mid-rule")
+func parse_succeedsWithNullableNonTerminalMidRule() throws {
+    // S → a A b, A → ε: the middle A derives nothing, input is "a b"
+    let grammar = try Grammar(bnf: """
+        <S> ::= 'a' <A> 'b'
+        <A> ::= ε
+        """, start: "S")
+    let result = try parse("a b", grammar: grammar)
+    #expect(result.isSuccessful)
+}
+
+@Test("SPPF leaf for epsilon uses grammar's configured epsilon meta character")
+func sppf_epsilonLeafUsesConfiguredMetaCharacter() throws {
+    // Parse the simplest epsilon grammar (S → a B b, B → ε) and confirm that
+    // an epsilon leaf node in the SPPF is labelled with the grammar's `epsilon`
+    // setting (default 'ε'), not a hard-coded string or the old ".eps" rawValue.
+    var grammar = try Grammar(bnf: """
+        <S> ::= 'a' <B> 'b'
+        <B> ::= ε
+        """, start: "S")
+    grammar.epsilon = .eps   // explicit default; change to .lambda to test the other path
+    let result = try parse("a b", grammar: grammar)
+    #expect(result.isSuccessful)
+    // If the SPPF was built, at least one leaf should carry the epsilon label.
+    if let sppf = result.sppfGraph {
+        let epsilonLeaves = sppf.getAllNodes().filter {
+            if case .leaf(let label, _, _) = $0 { return label == "\(grammar.epsilon)" }
+            return false
+        }
+        #expect(!epsilonLeaves.isEmpty)
+    }
+}
+

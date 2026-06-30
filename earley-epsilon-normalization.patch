@@ -1,0 +1,476 @@
+diff --git a/ALGORITHM.md b/ALGORITHM.md
+index 9867721..18f550c 100644
+--- a/ALGORITHM.md
++++ b/ALGORITHM.md
+@@ -158,57 +158,53 @@ than "there's nothing here."
+ 
+ ## 3. Why epsilon is hard, mechanically (not just conceptually)
+ 
+-Two implementation details compound the formal gap in §2:
+-
+-**(a) Epsilon-RHS representation is not uniform.** A production written
+-`A ::= ε` in BNF is *not* normalized to `rule == []` in this pipeline — the
+-`Grammar` package's `StandardForm` rewrite produces
+-`rule == [.terminal(.meta(.eps))]`, a **one-element** array. Several
+-properties paper over this inconsistently:
+-
+-- `Production.isNullable` and `Array<Symbol>.isNullable` both treat `[]`
+-  *and* `[.terminal(.meta(.eps))]` as nullable (`allSatisfy` is vacuously
+-  true for `[]`, and `.terminal(let t): t.isEmpty` is true for the eps case).
+-- `Symbol.isEpsilon` exists as a single-symbol predicate for the same check.
+-- But a naive `rule.isEmpty` check — the obvious thing to reach for — is
+-  **false** for the common case, since the rule is `[ε]`, not `[]`.
+-
+-This exact representational seam caused a previous, separate bug in
+-`Hygiene.eliminateEmpty` (in the `Grammar` package), where epsilon
+-productions encoded as one-element arrays were misclassified by code that
+-assumed `rule == []`. The bug fixed in this session (§4) is a different
+-*symptom* of the same underlying *cause*: code that needs to ask "is this
+-production directly nullable?" must use `isNullable`/`isEpsilon`, never
+-`rule.isEmpty`, anywhere in this codebase.
+-
+-**(b) `ParseStateItem` papers over (a) with a position-blind check**, and
+-says so itself:
++Two implementation details compound the formal gap in §2.
++
++**(a) Epsilon-RHS representation — historical problem, now resolved.**
++Previously, a production written `A ::= ε` in BNF was *not* normalized to
++`rule == []` by the `Grammar` package's `StandardForm` rewrite: it produced
++`rule == [.terminal(.meta(.eps))]`, a **one-element** array. This caused
++several inconsistencies that propagated throughout the Earley parser:
++
++- `Production.isNullable` and `Array<Symbol>.isNullable` both had to treat
++  `[]` *and* `[.terminal(.meta(.eps))]` as nullable.
++- `Symbol.isEpsilon` existed as a single-symbol predicate for the same check.
++- A naive `rule.isEmpty` check — the obvious test — was **false** for the
++  common case, since the rule was `[ε]`, not `[]`. This trap caused a bug
++  in `Hygiene.eliminateEmpty` in the `Grammar` package, and was the root
++  cause of the `expandSymbolNode` bug described in §4.
++
++**This ambiguity is now eliminated.** `Production.init` in the `Grammar`
++package normalizes every epsilon production to `rule == []` at creation: it
++filters out any symbol for which `Symbol.isEpsilon` is true before storing
++the rule. The epsilon meta character (`ε`, `λ`, etc.) is purely a rendering
++concern — it is applied by `Grammar.bnf`/`ebnf`/`wsn` and `Production.description`
++when producing human-readable output, but it is never part of stored data.
++
++**The resulting invariant throughout this codebase:** `rule.isEmpty` is the
++correct and complete test for "this production derives the empty string".
++`Production.isNullable`, `Array<Symbol>.isNullable`, and `Symbol.isEpsilon`
++remain available but are now redundant for the direct epsilon case; their
++utility is in the *derived nullable* case — a non-terminal whose every rule
++contains only nullable non-terminals.
++
++**(b) `ParseStateItem` papers over (a) — two checks now removed.**
++The old `isCompleted` and `nextSymbol` each contained a pattern-match that
++treated a bare epsilon terminal as if the dot was at the end of the rule.
++With `rule == []` as the canonical form, those branches were dead code: a
++`rule` can never contain `.terminal(.meta(.eps))` or `.terminal(.string(""))`
++after normalization. Both have been removed; `isCompleted` is now simply:
+ 
+ ```swift
+-// Note: The epsilon-terminal check is redundant and confusing.
+-// isCompleted should only check if the dot is past the end of the rule.
+-// The empty-terminal trick for nullable handling is a Grammar-layer concern,
+-// not a completion check.
+ var isCompleted: Bool {
+-    if !production.rule.indices.contains(productionPosition) { return true }
+-    if case let .terminal(t) = production.rule.last, t.isEmpty { return true }
+-    return false
++    return !production.rule.indices.contains(productionPosition)
+ }
+ ```
+ 
+-The second check makes `isCompleted` (and the matching `nextSymbol == nil`
+-check) true the instant an epsilon-RHS item is predicted, *regardless of
+-`productionPosition`* — it inspects `rule.last`, not the symbol actually at
+-the dot. This is what lets `complete()` process a fresh `(A ::= ·ε, j)` item
+-in the very same chart-building pass it was predicted in (no separate scan
+-step needed), which is necessary for nullable-handling to terminate. But it
+-is also exactly why `item.split` in §2's dead branch still reports
+-`alpha == []`: `isCompleted`'s notion of "done" and `split`'s notion of
+-"position" disagree for this one case. Two different functions each make a
+-locally-reasonable assumption, and the combination is what produces the
+-gap. This is the kind of thing that's nearly impossible to spot by reading
+-either function alone — it only shows up by tracing one specific item all
+-the way through both.
++For an epsilon production, `rule == []`, so `rule.indices` is empty, and
++`contains(0)` is immediately false — `isCompleted` is true from the first
++position. No secondary check required.
++
+ 
+ ---
+ 
+@@ -266,7 +262,7 @@ looking it up:
+ ```swift
+ if leftExtent == rightExtent {
+     let epsilonProductions = grammar.productions.filter {
+-        $0.goal.name == label && $0.isNullable
++        $0.goal.name == label && $0.rule.isEmpty
+     }
+     for production in epsilonProductions {
+         makePackedNode(
+@@ -278,12 +274,13 @@ if leftExtent == rightExtent {
+ }
+ ```
+ 
+-Two things make this correct rather than another instance of the same bug:
++Two things make this correct:
+ 
+-- It uses `Production.isNullable`, not `rule.isEmpty` — see §3(a). The first
+-  version of this fix used `rule.isEmpty` and silently did nothing on this
+-  exact grammar, because `A ::= ε` is `rule == [.terminal(.meta(.eps))]`
+-  here, not `rule == []`.
++- It uses `rule.isEmpty` — which, after Grammar's normalization, is the
++  exact and sufficient test for "this production derives the empty string".
++  An earlier version of this fix used `Production.isNullable` as a belt-and-
++  suspenders measure when `rule == [.terminal(.meta(.eps))]` was still a
++  possibility; that is no longer needed.
+ - It passes `position: 0` to the synthesized `NodeLabel`. Since
+   `symbols.prefix(0) == []` regardless of what `symbols` actually contains,
+   this unconditionally hits `makePackedNode`'s existing `alpha.isEmpty`
+@@ -299,14 +296,13 @@ Two things make this correct rather than another instance of the same bug:
+ 
+ The common thread across §2–§4 is: **ϒ is a sound but incomplete record of
+ derivations, and "incomplete" specifically means "silent about direct
+-epsilon completions."** Every consumer of ϒ has to treat a nullable
+-symbol with an empty span as a case to *construct from the grammar*, never
+-a case to *look up*. Concretely, for anyone extending this pipeline
+-(RNGLR/GLR's SPPF sharing, the CYK BSR/SPPF path, future incremental or
+-partial parsing):
+-
+-- Don't add a "does ϒ have an entry for this empty span?" check without
+-  also adding the synthesize-from-`isNullable` fallback — the absence of an
++epsilon completions."** Every consumer of ϒ has to treat a nullable symbol
++with an empty span as a case to *construct from the grammar*, never a case
++to *look up*. Concretely, for anyone extending this pipeline (RNGLR/GLR's
++SPPF sharing, the CYK BSR/SPPF path, future incremental or partial parsing):
++
++- Don't add a "does ϒ have an entry for this empty span?" check without also
++  adding the synthesize-from-`rule.isEmpty` fallback — the absence of an
+   entry is expected, not an error condition, for exactly this one shape.
+ - Always test nullable handling with at least: (1) a directly-nullable
+   symbol used as the *only* symbol consumed by a production (covered by Γ1
+@@ -316,18 +312,22 @@ partial parsing):
+   case (because the second nullable symbol's recognition is what triggers
+   `complete()`'s normal, non-special-cased path), so it is not currently
+   known to be broken, but it has not been traced as carefully as the direct
+-  case in this document and is worth a dedicated regression test.
+-- `rule.isEmpty` is never the right test for "is this an epsilon
+-  production" anywhere in this codebase. Use `Production.isNullable`,
+-  `Array<Symbol>.isNullable`, or `Symbol.isEpsilon` consistently — the
+-  `Hygiene.eliminateEmpty` bug and the bug fixed here are two independent
+-  discoveries of the same trap.
++  case and is worth a dedicated regression test.
++- **`rule.isEmpty` is now the correct and complete test for "is this an
++  epsilon production"** — the `Grammar` package's `Production.init`
++  normalizes epsilon away at construction time. `Production.isNullable`,
++  `Array<Symbol>.isNullable`, and `Symbol.isEpsilon` are still the right
++  tools for the *derived nullable* case (all rules of a non-terminal
++  contain only nullable non-terminals), but for a direct epsilon production,
++  `rule.isEmpty` is exact. The trap that caused the `Hygiene.eliminateEmpty`
++  bug and the `expandSymbolNode` bug documented here — reaching for
++  `rule.isEmpty` when the rule was `[.terminal(.meta(.eps))]` — is
++  structurally prevented now.
+ - The dead branch in `complete()` (§2) and the formerly-dead `alpha.isEmpty`
+   branch in `makePackedNode` (§4, now reachable) are both worth keeping —
+   they're small, correctly-reasoned pieces of logic for a case that's easy
+   to special-case in the wrong layer. Removing them would just mean
+   re-discovering the same need later.
+-
+ ---
+ 
+ ## 6. References
+diff --git a/Sources/Earley-Parser/BSR/ExtractSPPF.swift b/Sources/Earley-Parser/BSR/ExtractSPPF.swift
+index eaea42f..9eb90ab 100644
+--- a/Sources/Earley-Parser/BSR/ExtractSPPF.swift
++++ b/Sources/Earley-Parser/BSR/ExtractSPPF.swift
+@@ -136,11 +136,13 @@ extension EarleyParser {
+         // Synthesize the missing derivation directly from the grammar instead of relying
+         // on ϒ to contain it.
+         if leftExtent == rightExtent {
+-            // Note: a direct epsilon production is encoded here as `rule == [.terminal(.meta(.eps))]`
+-            // (a one-element array), not `rule == []` — so `rule.isEmpty` would never match it.
+-            // `Production.isNullable` is the correct test: it's true for both `[]` and `[ε]`.
++            // A direct epsilon production is encoded by the Grammar package as the
++            // canonical empty rule `rule == []` — never as a one-element array
++            // containing an explicit epsilon symbol (`Production.init` normalizes any
++            // such rule away at creation; see hakkabon/Grammar's Production.swift).
++            // `rule.isEmpty` is therefore the precise, reliable test here.
+             let epsilonProductions = grammar.productions.filter {
+-                $0.goal.name == label && $0.isNullable
++                $0.goal.name == label && $0.rule.isEmpty
+             }
+             for production in epsilonProductions {
+                 makePackedNode(
+@@ -228,9 +230,12 @@ extension EarleyParser {
+ 
+         let alpha = Array(label.symbols.prefix(label.position))
+ 
+-        // α = ε: epsilon production — attach a single epsilon leaf.
++        // α = ε: epsilon production — attach a single epsilon leaf. The label is purely
++        // for human-readable display; it uses whichever meta character this grammar is
++        // configured with (`grammar.epsilon`, 'ε' by default, possibly 'λ' or otherwise) —
++        // the underlying `Production.rule` this came from is `[]`, not a stored symbol.
+         if alpha.isEmpty {
+-            let epsNode = SPPFNode.leaf(label: MetaTerminal.eps.rawValue,
++            let epsNode = SPPFNode.leaf(label: "\(grammar.epsilon)",
+                                          leftExtent: leftExtent, rightExtent: rightExtent)
+             graph.addEdge(from: packedNode, to: epsNode)
+             Logger.sppf.trace("    \(packedNode) -> \(epsNode) [ε]")
+diff --git a/Sources/Earley-Parser/EarleyItem/ParseStateItem.swift b/Sources/Earley-Parser/EarleyItem/ParseStateItem.swift
+index 229f0b5..4359bbd 100644
+--- a/Sources/Earley-Parser/EarleyItem/ParseStateItem.swift
++++ b/Sources/Earley-Parser/EarleyItem/ParseStateItem.swift
+@@ -23,19 +23,15 @@ struct ParseStateItem {
+ 
+ extension ParseStateItem {
+ 
+-    // Note: The epsilon-terminal check is redundant and confusing.
+-    // isCompleted should only check if the dot is past the end of the rule.
+-    // The empty-terminal trick for nullable handling is a Grammar-layer concern,
+-    // not a completion check.
++    /// Returns `true` when the dot has advanced past the last symbol in the rule,
++    /// i.e. `productionPosition == production.rule.count`.
++    ///
++    /// With Grammar's epsilon normalization, an epsilon production is always
++    /// stored as `rule == []`, so `productionPosition == 0` immediately makes
++    /// `!production.rule.indices.contains(0)` true — no extra epsilon-terminal
++    /// branch is needed here.
+     var isCompleted: Bool {
+-//        return !production.rule.indices.contains(productionPosition)
+-        if !production.rule.indices.contains(productionPosition) {
+-            return true
+-        }
+-        if case let .terminal(t) = production.rule.last, t.isEmpty {
+-            return true
+-        }
+-        return false
++        return !production.rule.indices.contains(productionPosition)
+     }
+     
+     func advanced() -> ParseStateItem {
+@@ -49,14 +45,19 @@ extension ParseStateItem {
+         )
+     }
+     
++    /// The symbol immediately to the right of the dot, or `nil` when the item
++    /// is completed.
++    ///
++    /// Because `Production.init` normalizes any epsilon symbol away at creation
++    /// (see hakkabon/Grammar's Production.swift), a `rule` can never contain a
++    /// bare `.terminal(.meta(.eps))` or `.terminal(.string(""))` at runtime.
++    /// The earlier pattern-match that tested for an empty terminal and returned
++    /// `nil` prematurely is therefore gone: the only way `nextSymbol` is `nil`
++    /// is when `isCompleted` is true, i.e. the dot is past the end of the rule.
+     var nextSymbol: Symbol? {
+         guard production.rule.indices.contains(productionPosition) else {
+             return nil
+         }
+-//        return production.rule[productionPosition]
+-        if case let .terminal(t) = production.rule[productionPosition], t.isEmpty {
+-            return nil
+-        }
+         return production.rule[productionPosition]
+     }
+     
+@@ -65,19 +66,6 @@ extension ParseStateItem {
+         let beta = Array(production.rule.dropFirst(productionPosition))
+         return (alpha, beta, dotPosition: productionPosition)
+     }
+-    
+-    func isNullable(_ symbols: [Symbol]) -> Bool {
+-        return symbols.allSatisfy { symbol in
+-            switch symbol {
+-            case .terminal(let t):
+-                return t.isEmpty
+-            case .nonTerminal(_):
+-                return false
+-            case .metaSymbol(_):
+-                return false
+-            }
+-        }
+-    }
+ }
+ 
+ extension ParseStateItem: Equatable {
+diff --git a/Sources/Earley-Parser/EarleyParser.swift b/Sources/Earley-Parser/EarleyParser.swift
+index d6e9be2..d18819c 100644
+--- a/Sources/Earley-Parser/EarleyParser.swift
++++ b/Sources/Earley-Parser/EarleyParser.swift
+@@ -194,8 +194,11 @@ public struct EarleyParser {
+             }
+         }
+         
+-        // Special rule for ε rules: record a zero-width derivation at the current position.
+-        if item.production.rule.isNullable {
++        // Special rule for ε productions: record a zero-width derivation at the current
++        // position. With Grammar's normalization, an epsilon production is always
++        // `rule == []`, so `rule.isEmpty` is the exact test — no epsilon terminal
++        // symbol can appear inside a rule.
++        if item.production.rule.isEmpty {
+             if let bsrItem = bsrAdd(item: item,
+                                     leftExtent: currentIndex,   // j
+                                     pivot: currentIndex,        // j
+diff --git a/Sources/Earley-Parser/Parse.swift b/Sources/Earley-Parser/Parse.swift
+index f2a1f49..97712f5 100644
+--- a/Sources/Earley-Parser/Parse.swift
++++ b/Sources/Earley-Parser/Parse.swift
+@@ -142,6 +142,9 @@ extension EarleyParser: GeneralizedParser {
+             }
+         }.filter { nonTerminal in
+             productions[nonTerminal, default: []].contains(where: { production -> Bool in
++                // `production.rule.first` is `nil` for an epsilon production (`rule == []`),
++                // so it correctly never matches here — an ε-alternative doesn't itself
++                // "start with a terminal" for the purposes of an "expected token" message.
+                 if case .some(.terminal(_)) = production.rule.first {
+                     return true
+                 } else {
+diff --git a/Sources/Earley-Parser/SPPF/ParseTreeExtraction.swift b/Sources/Earley-Parser/SPPF/ParseTreeExtraction.swift
+index 05695fd..40cb832 100644
+--- a/Sources/Earley-Parser/SPPF/ParseTreeExtraction.swift
++++ b/Sources/Earley-Parser/SPPF/ParseTreeExtraction.swift
+@@ -112,7 +112,8 @@ extension EarleyParser {
+         let children = graph.getChildren(of: node).sorted()
+         
+         if children.isEmpty {
+-            // Empty production (epsilon)
++            // Empty production (epsilon): production.rule == [] after Grammar normalization.
++            // No children to recurse into; emit a leaf node for the goal symbol.
+             return [EarleyParseTree(symbol: production.goal.name, production: production)]
+         }
+         
+diff --git a/Sources/Earley-Parser/SPPF/SPPFGraph/NodeLabel.swift b/Sources/Earley-Parser/SPPF/SPPFGraph/NodeLabel.swift
+index 3c33540..17f7ca9 100644
+--- a/Sources/Earley-Parser/SPPF/SPPFGraph/NodeLabel.swift
++++ b/Sources/Earley-Parser/SPPF/SPPFGraph/NodeLabel.swift
+@@ -18,17 +18,16 @@ public struct NodeLabel: Codable {
+         return !symbols.indices.contains(position)
+     }
+ 
+-    var  isNullable: Bool {
+-        return symbols.allSatisfy { symbol in
+-            switch symbol {
+-            case .terminal(let t):
+-                return t.isEmpty
+-            case .nonTerminal(_):
+-                return false
+-            case .metaSymbol(_):
+-                return false
+-            }
+-        }
++    /// Returns `true` when `symbols` represents an epsilon (empty) production.
++    ///
++    /// Because `Production.init` in the Grammar package normalizes all epsilon
++    /// productions to `rule == []` at construction time, `symbols` (which is
++    /// set from `production.rule`) can never contain a bare epsilon terminal
++    /// such as `.terminal(.meta(.eps))`. The only form that denotes "derives
++    /// nothing" is an empty array, so `symbols.isEmpty` is both necessary and
++    /// sufficient here.
++    var isNullable: Bool {
++        return symbols.isEmpty
+     }
+     
+     var split: (alpha: [Symbol], delta: [Symbol], dotPosition: Int) {
+diff --git a/Sources/Earley-Parser/SPPF/SPPFGraph/SPPFGraph.swift b/Sources/Earley-Parser/SPPF/SPPFGraph/SPPFGraph.swift
+index cf96223..dc88207 100644
+--- a/Sources/Earley-Parser/SPPF/SPPFGraph/SPPFGraph.swift
++++ b/Sources/Earley-Parser/SPPF/SPPFGraph/SPPFGraph.swift
+@@ -86,6 +86,12 @@ public class SPPFGraph {
+                         changed = true
+                     }
+                 case .packed:
++                    // A packed node is productive if every one of its children is productive.
++                    // Note: epsilon packed nodes are given exactly one `.leaf` child by
++                    // `expandSymbolNode` (see ExtractSPPF.swift), so `children` is never
++                    // empty for a well-formed epsilon derivation. `allSatisfy` on a non-empty
++                    // set is the ordinary case; it is only vacuously true on an empty set,
++                    // which would indicate an orphaned packed node — those are pruned away.
+                     let allChildrenProductive = children.allSatisfy { productive.contains($0) }
+                     if allChildrenProductive {
+                         productive.insert(node)
+diff --git a/Sources/Earley-Parser/SPPF/SPPFGraph/SPPFNode.swift b/Sources/Earley-Parser/SPPF/SPPFGraph/SPPFNode.swift
+index 8b4eeae..e255a1c 100644
+--- a/Sources/Earley-Parser/SPPF/SPPFGraph/SPPFNode.swift
++++ b/Sources/Earley-Parser/SPPF/SPPFGraph/SPPFNode.swift
+@@ -10,7 +10,11 @@ import Foundation
+ 
+ /// SPPF Node types following Scott & Johnstone:
+ public enum SPPFNode: Codable {
+-    /// leaf nodes: terminals and epsilon
++    /// Terminal and epsilon leaf nodes. The `label` for an epsilon leaf is the
++    /// grammar's configured epsilon meta character (e.g. `"ε"` or `"λ"`, set via
++    /// `Grammar.epsilon` and applied in `ExtractSPPF.makePackedNode`). It is a
++    /// display-only string — the underlying production that generated the node
++    /// has `rule == []`, never a stored epsilon terminal symbol.
+     case leaf(label: String, leftExtent: Int, rightExtent: Int)
+     /// symbol nodes: non-terminals and terminals
+     case symbol(label: String, leftExtent: Int, rightExtent: Int)
+diff --git a/Tests/Earley-ParserTests/ScottJohnstoneTests.swift b/Tests/Earley-ParserTests/ScottJohnstoneTests.swift
+index e2976f8..303ff66 100644
+--- a/Tests/Earley-ParserTests/ScottJohnstoneTests.swift
++++ b/Tests/Earley-ParserTests/ScottJohnstoneTests.swift
+@@ -206,3 +206,63 @@ func scottJohnstone_parsetree_2026_1() throws {
+     let parsetree = try parser.syntaxTree(for: input).mapLeafs{ String(input[$0]) }
+     #expect(parsetree.root == "S")
+ }
++
++// MARK: - Epsilon normalization invariants
++
++@Test("Grammar imports: epsilon 'ε' is stored as rule == [] (Scott 2008 ex.1, B ::= ε)")
++func epsilonProductionNormalized_2008_1() throws {
++    let grammar = try Grammar(bnf: ScottJohnstone2008_1, start: "S")
++    // B ::= ε must be stored as the canonical empty rule, not as [.terminal(.meta(.eps))]
++    let bEps = grammar.productions.first { $0.goal.name == "B" }
++    #expect(bEps?.rule.isEmpty == true)
++}
++
++@Test("Grammar imports: epsilon 'ε' is stored as rule == [] (Scott 2019 ex.1, A ::= ε and B ::= ε)")
++func epsilonProductionNormalized_2019_1() throws {
++    let grammar = try Grammar(bnf: ScottJohnstone2019_1, start: "S")
++    let aEps = grammar.productions.first { $0.goal.name == "A" && $0.isNullable }
++    let bEps = grammar.productions.first { $0.goal.name == "B" && $0.isNullable }
++    #expect(aEps?.rule.isEmpty == true)
++    #expect(bEps?.rule.isEmpty == true)
++}
++
++@Test("Grammar imports: epsilon 'ε' is stored as rule == [] (Scott 2026 ex.1, A ::= ε)")
++func epsilonProductionNormalized_2026_1() throws {
++    let grammar = try Grammar(bnf: ScottJohnstone2026_1, start: "S")
++    let aEps = grammar.productions.first { $0.goal.name == "A" && $0.isNullable }
++    #expect(aEps?.rule.isEmpty == true)
++}
++
++@Test("Parse succeeds on grammar that contains nullable non-terminal mid-rule")
++func parse_succeedsWithNullableNonTerminalMidRule() throws {
++    // S → a A b, A → ε: the middle A derives nothing, input is "a b"
++    let grammar = try Grammar(bnf: """
++        <S> ::= 'a' <A> 'b'
++        <A> ::= ε
++        """, start: "S")
++    let result = try parse("a b", grammar: grammar)
++    #expect(result.isSuccessful)
++}
++
++@Test("SPPF leaf for epsilon uses grammar's configured epsilon meta character")
++func sppf_epsilonLeafUsesConfiguredMetaCharacter() throws {
++    // Parse the simplest epsilon grammar (S → a B b, B → ε) and confirm that
++    // an epsilon leaf node in the SPPF is labelled with the grammar's `epsilon`
++    // setting (default 'ε'), not a hard-coded string or the old ".eps" rawValue.
++    var grammar = try Grammar(bnf: """
++        <S> ::= 'a' <B> 'b'
++        <B> ::= ε
++        """, start: "S")
++    grammar.epsilon = .eps   // explicit default; change to .lambda to test the other path
++    let result = try parse("a b", grammar: grammar)
++    #expect(result.isSuccessful)
++    // If the SPPF was built, at least one leaf should carry the epsilon label.
++    if let sppf = result.sppfGraph {
++        let epsilonLeaves = sppf.getAllNodes().filter {
++            if case .leaf(let label, _, _) = $0 { return label == "\(grammar.epsilon)" }
++            return false
++        }
++        #expect(!epsilonLeaves.isEmpty)
++    }
++}
++

@@ -194,8 +194,11 @@ public struct EarleyParser {
             }
         }
         
-        // Special rule for ε rules: record a zero-width derivation at the current position.
-        if item.production.rule.isNullable {
+        // Special rule for ε productions: record a zero-width derivation at the current
+        // position. With Grammar's normalization, an epsilon production is always
+        // `rule == []`, so `rule.isEmpty` is the exact test — no epsilon terminal
+        // symbol can appear inside a rule.
+        if item.production.rule.isEmpty {
             if let bsrItem = bsrAdd(item: item,
                                     leftExtent: currentIndex,   // j
                                     pivot: currentIndex,        // j

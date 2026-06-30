@@ -86,6 +86,12 @@ public class SPPFGraph {
                         changed = true
                     }
                 case .packed:
+                    // A packed node is productive if every one of its children is productive.
+                    // Note: epsilon packed nodes are given exactly one `.leaf` child by
+                    // `expandSymbolNode` (see ExtractSPPF.swift), so `children` is never
+                    // empty for a well-formed epsilon derivation. `allSatisfy` on a non-empty
+                    // set is the ordinary case; it is only vacuously true on an empty set,
+                    // which would indicate an orphaned packed node — those are pruned away.
                     let allChildrenProductive = children.allSatisfy { productive.contains($0) }
                     if allChildrenProductive {
                         productive.insert(node)

@@ -23,19 +23,15 @@ struct ParseStateItem {
 
 extension ParseStateItem {
 
-    // Note: The epsilon-terminal check is redundant and confusing.
-    // isCompleted should only check if the dot is past the end of the rule.
-    // The empty-terminal trick for nullable handling is a Grammar-layer concern,
-    // not a completion check.
+    /// Returns `true` when the dot has advanced past the last symbol in the rule,
+    /// i.e. `productionPosition == production.rule.count`.
+    ///
+    /// With Grammar's epsilon normalization, an epsilon production is always
+    /// stored as `rule == []`, so `productionPosition == 0` immediately makes
+    /// `!production.rule.indices.contains(0)` true — no extra epsilon-terminal
+    /// branch is needed here.
     var isCompleted: Bool {
-//        return !production.rule.indices.contains(productionPosition)
-        if !production.rule.indices.contains(productionPosition) {
-            return true
-        }
-        if case let .terminal(t) = production.rule.last, t.isEmpty {
-            return true
-        }
-        return false
+        return !production.rule.indices.contains(productionPosition)
     }
     
     func advanced() -> ParseStateItem {
@@ -49,12 +45,17 @@ extension ParseStateItem {
         )
     }
     
+    /// The symbol immediately to the right of the dot, or `nil` when the item
+    /// is completed.
+    ///
+    /// Because `Production.init` normalizes any epsilon symbol away at creation
+    /// (see hakkabon/Grammar's Production.swift), a `rule` can never contain a
+    /// bare `.terminal(.meta(.eps))` or `.terminal(.string(""))` at runtime.
+    /// The earlier pattern-match that tested for an empty terminal and returned
+    /// `nil` prematurely is therefore gone: the only way `nextSymbol` is `nil`
+    /// is when `isCompleted` is true, i.e. the dot is past the end of the rule.
     var nextSymbol: Symbol? {
         guard production.rule.indices.contains(productionPosition) else {
-            return nil
-        }
-//        return production.rule[productionPosition]
-        if case let .terminal(t) = production.rule[productionPosition], t.isEmpty {
             return nil
         }
         return production.rule[productionPosition]
@@ -64,19 +65,6 @@ extension ParseStateItem {
         let alpha: [Symbol] = Array(production.rule.prefix(productionPosition))
         let beta = Array(production.rule.dropFirst(productionPosition))
         return (alpha, beta, dotPosition: productionPosition)
-    }
-    
-    func isNullable(_ symbols: [Symbol]) -> Bool {
-        return symbols.allSatisfy { symbol in
-            switch symbol {
-            case .terminal(let t):
-                return t.isEmpty
-            case .nonTerminal(_):
-                return false
-            case .metaSymbol(_):
-                return false
-            }
-        }
     }
 }
 

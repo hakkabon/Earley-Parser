@@ -18,17 +18,16 @@ public struct NodeLabel: Codable {
         return !symbols.indices.contains(position)
     }
 
-    var  isNullable: Bool {
-        return symbols.allSatisfy { symbol in
-            switch symbol {
-            case .terminal(let t):
-                return t.isEmpty
-            case .nonTerminal(_):
-                return false
-            case .metaSymbol(_):
-                return false
-            }
-        }
+    /// Returns `true` when `symbols` represents an epsilon (empty) production.
+    ///
+    /// Because `Production.init` in the Grammar package normalizes all epsilon
+    /// productions to `rule == []` at construction time, `symbols` (which is
+    /// set from `production.rule`) can never contain a bare epsilon terminal
+    /// such as `.terminal(.meta(.eps))`. The only form that denotes "derives
+    /// nothing" is an empty array, so `symbols.isEmpty` is both necessary and
+    /// sufficient here.
+    var isNullable: Bool {
+        return symbols.isEmpty
     }
     
     var split: (alpha: [Symbol], delta: [Symbol], dotPosition: Int) {

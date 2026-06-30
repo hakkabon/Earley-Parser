@@ -112,7 +112,8 @@ extension EarleyParser {
         let children = graph.getChildren(of: node).sorted()
         
         if children.isEmpty {
-            // Empty production (epsilon)
+            // Empty production (epsilon): production.rule == [] after Grammar normalization.
+            // No children to recurse into; emit a leaf node for the goal symbol.
             return [EarleyParseTree(symbol: production.goal.name, production: production)]
         }
         

@@ -10,7 +10,11 @@ import Foundation
 
 /// SPPF Node types following Scott & Johnstone:
 public enum SPPFNode: Codable {
-    /// leaf nodes: terminals and epsilon
+    /// Terminal and epsilon leaf nodes. The `label` for an epsilon leaf is the
+    /// grammar's configured epsilon meta character (e.g. `"ε"` or `"λ"`, set via
+    /// `Grammar.epsilon` and applied in `ExtractSPPF.makePackedNode`). It is a
+    /// display-only string — the underlying production that generated the node
+    /// has `rule == []`, never a stored epsilon terminal symbol.
     case leaf(label: String, leftExtent: Int, rightExtent: Int)
     /// symbol nodes: non-terminals and terminals
     case symbol(label: String, leftExtent: Int, rightExtent: Int)

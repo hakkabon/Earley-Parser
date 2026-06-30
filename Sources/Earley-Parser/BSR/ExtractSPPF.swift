@@ -136,11 +136,13 @@ extension EarleyParser {
         // Synthesize the missing derivation directly from the grammar instead of relying
         // on ϒ to contain it.
         if leftExtent == rightExtent {
-            // Note: a direct epsilon production is encoded here as `rule == [.terminal(.meta(.eps))]`
-            // (a one-element array), not `rule == []` — so `rule.isEmpty` would never match it.
-            // `Production.isNullable` is the correct test: it's true for both `[]` and `[ε]`.
+            // A direct epsilon production is encoded by the Grammar package as the
+            // canonical empty rule `rule == []` — never as a one-element array
+            // containing an explicit epsilon symbol (`Production.init` normalizes any
+            // such rule away at creation; see hakkabon/Grammar's Production.swift).
+            // `rule.isEmpty` is therefore the precise, reliable test here.
             let epsilonProductions = grammar.productions.filter {
-                $0.goal.name == label && $0.isNullable
+                $0.goal.name == label && $0.rule.isEmpty
             }
             for production in epsilonProductions {
                 makePackedNode(
@@ -228,9 +230,12 @@ extension EarleyParser {
 
         let alpha = Array(label.symbols.prefix(label.position))
 
-        // α = ε: epsilon production — attach a single epsilon leaf.
+        // α = ε: epsilon production — attach a single epsilon leaf. The label is purely
+        // for human-readable display; it uses whichever meta character this grammar is
+        // configured with (`grammar.epsilon`, 'ε' by default, possibly 'λ' or otherwise) —
+        // the underlying `Production.rule` this came from is `[]`, not a stored symbol.
         if alpha.isEmpty {
-            let epsNode = SPPFNode.leaf(label: MetaTerminal.eps.rawValue,
+            let epsNode = SPPFNode.leaf(label: "\(grammar.epsilon)",
                                          leftExtent: leftExtent, rightExtent: rightExtent)
             graph.addEdge(from: packedNode, to: epsNode)
             Logger.sppf.trace("    \(packedNode) -> \(epsNode) [ε]")

@@ -158,57 +158,53 @@ than "there's nothing here."
 
 ## 3. Why epsilon is hard, mechanically (not just conceptually)
 
-Two implementation details compound the formal gap in §2:
+Two implementation details compound the formal gap in §2.
 
-**(a) Epsilon-RHS representation is not uniform.** A production written
-`A ::= ε` in BNF is *not* normalized to `rule == []` in this pipeline — the
-`Grammar` package's `StandardForm` rewrite produces
-`rule == [.terminal(.meta(.eps))]`, a **one-element** array. Several
-properties paper over this inconsistently:
+**(a) Epsilon-RHS representation — historical problem, now resolved.**
+Previously, a production written `A ::= ε` in BNF was *not* normalized to
+`rule == []` by the `Grammar` package's `StandardForm` rewrite: it produced
+`rule == [.terminal(.meta(.eps))]`, a **one-element** array. This caused
+several inconsistencies that propagated throughout the Earley parser:
 
-- `Production.isNullable` and `Array<Symbol>.isNullable` both treat `[]`
-  *and* `[.terminal(.meta(.eps))]` as nullable (`allSatisfy` is vacuously
-  true for `[]`, and `.terminal(let t): t.isEmpty` is true for the eps case).
-- `Symbol.isEpsilon` exists as a single-symbol predicate for the same check.
-- But a naive `rule.isEmpty` check — the obvious thing to reach for — is
-  **false** for the common case, since the rule is `[ε]`, not `[]`.
+- `Production.isNullable` and `Array<Symbol>.isNullable` both had to treat
+  `[]` *and* `[.terminal(.meta(.eps))]` as nullable.
+- `Symbol.isEpsilon` existed as a single-symbol predicate for the same check.
+- A naive `rule.isEmpty` check — the obvious test — was **false** for the
+  common case, since the rule was `[ε]`, not `[]`. This trap caused a bug
+  in `Hygiene.eliminateEmpty` in the `Grammar` package, and was the root
+  cause of the `expandSymbolNode` bug described in §4.
 
-This exact representational seam caused a previous, separate bug in
-`Hygiene.eliminateEmpty` (in the `Grammar` package), where epsilon
-productions encoded as one-element arrays were misclassified by code that
-assumed `rule == []`. The bug fixed in this session (§4) is a different
-*symptom* of the same underlying *cause*: code that needs to ask "is this
-production directly nullable?" must use `isNullable`/`isEpsilon`, never
-`rule.isEmpty`, anywhere in this codebase.
+**This ambiguity is now eliminated.** `Production.init` in the `Grammar`
+package normalizes every epsilon production to `rule == []` at creation: it
+filters out any symbol for which `Symbol.isEpsilon` is true before storing
+the rule. The epsilon meta character (`ε`, `λ`, etc.) is purely a rendering
+concern — it is applied by `Grammar.bnf`/`ebnf`/`wsn` and `Production.description`
+when producing human-readable output, but it is never part of stored data.
 
-**(b) `ParseStateItem` papers over (a) with a position-blind check**, and
-says so itself:
+**The resulting invariant throughout this codebase:** `rule.isEmpty` is the
+correct and complete test for "this production derives the empty string".
+`Production.isNullable`, `Array<Symbol>.isNullable`, and `Symbol.isEpsilon`
+remain available but are now redundant for the direct epsilon case; their
+utility is in the *derived nullable* case — a non-terminal whose every rule
+contains only nullable non-terminals.
+
+**(b) `ParseStateItem` papers over (a) — two checks now removed.**
+The old `isCompleted` and `nextSymbol` each contained a pattern-match that
+treated a bare epsilon terminal as if the dot was at the end of the rule.
+With `rule == []` as the canonical form, those branches were dead code: a
+`rule` can never contain `.terminal(.meta(.eps))` or `.terminal(.string(""))`
+after normalization. Both have been removed; `isCompleted` is now simply:
 
 ```swift
-// Note: The epsilon-terminal check is redundant and confusing.
-// isCompleted should only check if the dot is past the end of the rule.
-// The empty-terminal trick for nullable handling is a Grammar-layer concern,
-// not a completion check.
 var isCompleted: Bool {
-    if !production.rule.indices.contains(productionPosition) { return true }
-    if case let .terminal(t) = production.rule.last, t.isEmpty { return true }
-    return false
+    return !production.rule.indices.contains(productionPosition)
 }
 ```
 
-The second check makes `isCompleted` (and the matching `nextSymbol == nil`
-check) true the instant an epsilon-RHS item is predicted, *regardless of
-`productionPosition`* — it inspects `rule.last`, not the symbol actually at
-the dot. This is what lets `complete()` process a fresh `(A ::= ·ε, j)` item
-in the very same chart-building pass it was predicted in (no separate scan
-step needed), which is necessary for nullable-handling to terminate. But it
-is also exactly why `item.split` in §2's dead branch still reports
-`alpha == []`: `isCompleted`'s notion of "done" and `split`'s notion of
-"position" disagree for this one case. Two different functions each make a
-locally-reasonable assumption, and the combination is what produces the
-gap. This is the kind of thing that's nearly impossible to spot by reading
-either function alone — it only shows up by tracing one specific item all
-the way through both.
+For an epsilon production, `rule == []`, so `rule.indices` is empty, and
+`contains(0)` is immediately false — `isCompleted` is true from the first
+position. No secondary check required.
+
 
 ---
 
@@ -266,7 +262,7 @@ looking it up:
 ```swift
 if leftExtent == rightExtent {
     let epsilonProductions = grammar.productions.filter {
-        $0.goal.name == label && $0.isNullable
+        $0.goal.name == label && $0.rule.isEmpty
     }
     for production in epsilonProductions {
         makePackedNode(
@@ -278,12 +274,13 @@ if leftExtent == rightExtent {
 }
 ```
 
-Two things make this correct rather than another instance of the same bug:
+Two things make this correct:
 
-- It uses `Production.isNullable`, not `rule.isEmpty` — see §3(a). The first
-  version of this fix used `rule.isEmpty` and silently did nothing on this
-  exact grammar, because `A ::= ε` is `rule == [.terminal(.meta(.eps))]`
-  here, not `rule == []`.
+- It uses `rule.isEmpty` — which, after Grammar's normalization, is the
+  exact and sufficient test for "this production derives the empty string".
+  An earlier version of this fix used `Production.isNullable` as a belt-and-
+  suspenders measure when `rule == [.terminal(.meta(.eps))]` was still a
+  possibility; that is no longer needed.
 - It passes `position: 0` to the synthesized `NodeLabel`. Since
   `symbols.prefix(0) == []` regardless of what `symbols` actually contains,
   this unconditionally hits `makePackedNode`'s existing `alpha.isEmpty`
@@ -299,14 +296,13 @@ Two things make this correct rather than another instance of the same bug:
 
 The common thread across §2–§4 is: **ϒ is a sound but incomplete record of
 derivations, and "incomplete" specifically means "silent about direct
-epsilon completions."** Every consumer of ϒ has to treat a nullable
-symbol with an empty span as a case to *construct from the grammar*, never
-a case to *look up*. Concretely, for anyone extending this pipeline
-(RNGLR/GLR's SPPF sharing, the CYK BSR/SPPF path, future incremental or
-partial parsing):
+epsilon completions."** Every consumer of ϒ has to treat a nullable symbol
+with an empty span as a case to *construct from the grammar*, never a case
+to *look up*. Concretely, for anyone extending this pipeline (RNGLR/GLR's
+SPPF sharing, the CYK BSR/SPPF path, future incremental or partial parsing):
 
-- Don't add a "does ϒ have an entry for this empty span?" check without
-  also adding the synthesize-from-`isNullable` fallback — the absence of an
+- Don't add a "does ϒ have an entry for this empty span?" check without also
+  adding the synthesize-from-`rule.isEmpty` fallback — the absence of an
   entry is expected, not an error condition, for exactly this one shape.
 - Always test nullable handling with at least: (1) a directly-nullable
   symbol used as the *only* symbol consumed by a production (covered by Γ1
@@ -316,18 +312,22 @@ partial parsing):
   case (because the second nullable symbol's recognition is what triggers
   `complete()`'s normal, non-special-cased path), so it is not currently
   known to be broken, but it has not been traced as carefully as the direct
-  case in this document and is worth a dedicated regression test.
-- `rule.isEmpty` is never the right test for "is this an epsilon
-  production" anywhere in this codebase. Use `Production.isNullable`,
-  `Array<Symbol>.isNullable`, or `Symbol.isEpsilon` consistently — the
-  `Hygiene.eliminateEmpty` bug and the bug fixed here are two independent
-  discoveries of the same trap.
+  case and is worth a dedicated regression test.
+- **`rule.isEmpty` is now the correct and complete test for "is this an
+  epsilon production"** — the `Grammar` package's `Production.init`
+  normalizes epsilon away at construction time. `Production.isNullable`,
+  `Array<Symbol>.isNullable`, and `Symbol.isEpsilon` are still the right
+  tools for the *derived nullable* case (all rules of a non-terminal
+  contain only nullable non-terminals), but for a direct epsilon production,
+  `rule.isEmpty` is exact. The trap that caused the `Hygiene.eliminateEmpty`
+  bug and the `expandSymbolNode` bug documented here — reaching for
+  `rule.isEmpty` when the rule was `[.terminal(.meta(.eps))]` — is
+  structurally prevented now.
 - The dead branch in `complete()` (§2) and the formerly-dead `alpha.isEmpty`
   branch in `makePackedNode` (§4, now reachable) are both worth keeping —
   they're small, correctly-reasoned pieces of logic for a case that's easy
   to special-case in the wrong layer. Removing them would just mean
   re-discovering the same need later.
-
 ---
 
 ## 6. References

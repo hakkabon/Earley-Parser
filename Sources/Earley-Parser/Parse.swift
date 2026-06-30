@@ -142,6 +142,9 @@ extension EarleyParser: GeneralizedParser {
             }
         }.filter { nonTerminal in
             productions[nonTerminal, default: []].contains(where: { production -> Bool in
+                // `production.rule.first` is `nil` for an epsilon production (`rule == []`),
+                // so it correctly never matches here — an ε-alternative doesn't itself
+                // "start with a terminal" for the purposes of an "expected token" message.
                 if case .some(.terminal(_)) = production.rule.first {
                     return true
                 } else {
