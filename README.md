@@ -173,6 +173,35 @@ if let trees = try? ambParser.allSyntaxTrees(for: "a + a * a") {
 }
 ```
 
+### Parsing a `TokenStream` directly
+
+`parse(_ string:)` is a convenience over `parse(stream:)` that tokenizes with
+GrammarTokenizer's general-purpose `Tokenizer`. Any `TokenStream` — from
+[Lexer](https://github.com/hakkabon/Lexer) — can be passed directly instead,
+which is what makes a fully automated, `GrammarVocabulary`-driven DFA lexer a
+drop-in replacement for the hand-written tokenizer:
+
+```swift
+import Grammar
+import Lexer
+import Earley_Parser
+
+// Option 1: a DFA lexer built from this grammar's own GrammarVocabulary.
+var builder = LexerBuilder()
+builder.loadVocabulary(myGrammarVocabulary)
+let lexer = try builder.build()
+let dfaStream = try LexerTokenStream(source: "1 + 2 * 3", lexer: lexer)
+let result1 = try parser.parse(stream: dfaStream)
+
+// Option 2: GrammarTokenizer's hand-written Tokenizer (what parse(_:) uses
+// internally by default).
+let tokenizerStream = TokenizerStream(source: "1 + 2 * 3", symbols: ["+", "*"])
+let result2 = try parser.parse(stream: tokenizerStream)
+```
+
+Both streams satisfy the same `TokenStream` protocol, so a parser never has to
+know or care which front end produced the tokens it's reading.
+
 ### Command-Line Tool (`gtool`)
 
 ```bash
@@ -224,7 +253,7 @@ The test suite covers:
 ## Dependencies
 
 - [Grammar](https://github.com/hakkabon/Grammar) (Grammar types, BNF/EBNF/WSN parsers)
-- [GrammarTokenizer](https://github.com/hakkabon/GrammarTokenizer) (Input tokenisation)
+- [Lexer](https://github.com/hakkabon/Lexer) (`TokenStream` protocol, DFA lexer, and GrammarTokenizer bridge — see below)
 - [GrammarDiagram](https://github.com/hakkabon/GrammarDiagram) (Railroad diagram generation)
 - [TerminalColors](https://github.com/hakkabon/TerminalColors) (Coloured terminal output)
 - [swift-argument-parser](https://github.com/apple/swift-argument-parser) (CLI `gtool`)

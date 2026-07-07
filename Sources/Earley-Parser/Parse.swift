@@ -8,7 +8,7 @@
 
 import Foundation
 import Grammar
-import Tokenizer
+import Lexer
 import OSLog
 
 let symbols = [
@@ -19,8 +19,29 @@ let symbols = [
 
 extension EarleyParser: GeneralizedParser {
 
+    /// Parses `string` by scanning it with GrammarTokenizer's general-purpose
+    /// `Tokenizer` (configured with this module's fixed `symbols` list) and
+    /// delegating to `parse(stream:)`.
+    ///
+    /// This preserves the exact tokenization this method always used; it is
+    /// now a thin convenience over the stream-based entry point rather than
+    /// its own separate implementation.
     public func parse(_ string: String) throws -> ParseResult {
-        
+        try parse(stream: TokenizerStream(source: string, symbols: Set(symbols), keywords: []))
+    }
+
+    /// Parses any `TokenStream` — the DFA-driven `LexerTokenStream` (built
+    /// via a `LexerBuilder` bootstrapped from a `GrammarVocabulary`) and the
+    /// hand-written `TokenizerStream` are both accepted interchangeably, as
+    /// is any other conformance.
+    ///
+    /// - Parameter stream: A positioned sequence of tokens, each resolvable
+    ///   to a `Terminal` and a source `Range<String.Index>`.
+    /// - Returns: A `ParseResult` describing success, the BSR set, and the SPPF graph.
+    /// - Throws: A `SyntaxError` if the input is not in the recognised language,
+    ///   or whatever error `stream.terminal(at:)` throws for a lexical failure.
+    public func parse<S: TokenStream>(stream: S) throws -> ParseResult {
+
         let nonTerminalProductions = Dictionary(grouping: grammar.productions, by: {$0.goal})
 
         // The start state contains all productions which can be reached directly from the starting non terminal
@@ -30,69 +51,50 @@ extension EarleyParser: GeneralizedParser {
             processState(productions: nonTerminalProductions, allStates: [], knownItems: initState, newItems: initState, currentIndex: 0)
         }
 
-        // Tokenize once and reuse throughout the parse.
-        let inputTokens = Tokenizer(string, symbols: Set(symbols), keywords: Set([])).tokenize()
-        var tokenization: [[(terminal: Terminal, range: Range<String.Index>)]] = []
-        tokenization.reserveCapacity(inputTokens.count)
+        // Ranges collected as we scan — reused for SPPF/CST extraction below,
+        // so the stream only needs to be walked once.
+        var tokenRanges: [Range<String.Index>] = []
+        tokenRanges.reserveCapacity(stream.count)
 
         Logger.earley.trace("(Grammar)\n\(grammar.wsn)")
         Logger.earley.trace("nullable non-terminals: \(grammar.nullableNonTerminals)")
         Logger.earley.trace("generated non-terminals: \(grammar.generatedNonTerminals)")
-        Logger.earley.trace("input tokens: \(inputTokens)")
         Logger.earley.trace("earley items set [0]: \(initState)")
 
         var stateCollection: [Set<ParseStateItem>] = [initState]
-        stateCollection.reserveCapacity(inputTokens.count + 1)
+        stateCollection.reserveCapacity(stream.count + 1)
 
         var bsrSet = Set<BSR>(bsr)
 
-        var currentIndex: String.Index = string.startIndex
+        var currentIndex: String.Index = stream.source.startIndex
 
-        for (n, inputToken) in inputTokens.enumerated() {
+        for n in 0..<stream.count {
             let lastState = stateCollection.last!
 
             // Collect all terminals which could occur at the current location according to the grammar
             // From `lastState` (last parse state), collect all `ParseStateItems` which have a terminal symbol
             // as their next symbol by peeking at the lookahead of the earley item.
-            let newItems: (setItems: Set<ParseStateItem>, terminal: Terminal, range: Range<String.Index>, bsr: Set<BSR>)? = {
-                let (terminal, range) = switch inputToken.type {
-                case .symbol(let token):
-                    (Terminal(string: token), inputToken.range)
-                case .literal(let token):
-                    (Terminal(string: token), inputToken.range)
-                case .identifier(let token):
-                    (Terminal(string: token), inputToken.range)
-                case .number(let token):
-                    switch token {
-                    case .decimal(let value), .binary(let value), .octal(let value), .hexadecimal(let value):
-                        (Terminal(string: "\(value)"), inputToken.range)
-                    }
-                default:
-                    fatalError("symbol \(inputToken) not recognized")
-                }
-                let (items, bsr) = scan(state: lastState, token: terminal, currentIndex: n)
-                return (setItems: items, terminal: terminal, range: range, bsr: bsr)
-            }()
-            
+            let (terminal, range) = try stream.terminal(at: n)
+            let (newItemSet, scanBsr) = scan(state: lastState, token: terminal, currentIndex: n)
+
             // Report a syntax error if no new Earley items could be found.
-            guard let newItems = newItems, !newItems.setItems.isEmpty else {
-                throw errorHandling(lastState: lastState, productions: nonTerminalProductions, input: string, index: currentIndex)
+            guard !newItemSet.isEmpty else {
+                throw errorHandling(lastState: lastState, productions: nonTerminalProductions, input: stream.source, index: currentIndex)
             }
 
-            let newItemSet = newItems.setItems
-            tokenization.append([(terminal: newItems.terminal, range: newItems.range)])
-            Logger.earley.trace("input[\(n)] \(inputToken) -> earley items(\(n+1)): \(newItemSet)\n")
-            bsrSet.formUnion(newItems.bsr)
+            tokenRanges.append(range)
+            Logger.earley.trace("input[\(n)] -> earley items(\(n+1)): \(newItemSet)\n")
+            bsrSet.formUnion(scanBsr)
 
             // Pass the correct current index (n+1 = the index of the new state being built).
             let (state, stateBsr) = processState(productions: nonTerminalProductions, allStates: stateCollection, knownItems: newItemSet, newItems: newItemSet, currentIndex: n + 1)
             stateCollection.append(state)
-            currentIndex = newItems.range.upperBound
+            currentIndex = range.upperBound
             bsrSet.formUnion(stateBsr)
 
             Logger.earley.trace("earley items set [\(n+1)]: \(stateCollection[n+1])")
         }
-        
+
         // When building the parse tree we only need the completed Earley items.
         // Collect all successfully parsed Earley items (completed items).
         let parseStates = stateCollection.enumerated().reduce(Array<Set<CompletedItem>>(repeating: [], count: stateCollection.count)) { (parseStates, element) in
@@ -105,23 +107,22 @@ extension EarleyParser: GeneralizedParser {
 
         // Check success: the final state must contain a completed item for a production
         // whose goal matches the start symbol spanning the entire input (startTokenIndex == 0).
-        let isSuccessful = stateCollection[tokenization.count].contains { item in
+        let isSuccessful = stateCollection[tokenRanges.count].contains { item in
             item.production.goal == grammar.start &&
             item.isCompleted &&
             item.startTokenIndex == 0
         }
-        
+
         Logger.earley.trace("completed earley items: \(parseStates)")
-        Logger.earley.trace("tokenization: \(tokenization)")
-        Logger.earley.trace("tokenization length: \(tokenization.count)")
+        Logger.earley.trace("tokenization length: \(tokenRanges.count)")
         Logger.earley.trace("parse result isSuccessful: \(isSuccessful)")
         Logger.earley.trace("parse successful: \(isSuccessful ? "YES" : "NO")")
-        
-        // Build the SPPF from the BSR set (reuse already-tokenized tokens).
+
+        // Build the SPPF from the BSR set (reuse the ranges collected above).
         return ParseResult(
             isSuccessful: isSuccessful,
             bsr: bsrSet,
-            sppfGraph: isSuccessful ? extractSPPF(tokens: inputTokens, bsr: bsrSet) : nil
+            sppfGraph: isSuccessful ? extractSPPF(tokenCount: tokenRanges.count, bsr: bsrSet) : nil
         )
     }
 

@@ -8,7 +8,6 @@
 
 import Foundation
 import Grammar
-import Tokenizer
 import OSLog
 
 ///  Revised to correctly implement the SPPF extraction algorithm from:
@@ -33,10 +32,10 @@ extension EarleyParser {
     ///   2. While G has an extendable leaf node w = (μ, i, j):
     ///      - If μ is a non-terminal X: expand using all (X ::= γ, i, k, j) ∈ ϒ.
     ///      - If μ is an intermediate label X ::= α·δ: expand using BSR snodes for α.
-    func extractSPPF(tokens: [Token], bsr: Set<BSR>) -> SPPFGraph {
+    func extractSPPF(tokenCount: Int, bsr: Set<BSR>) -> SPPFGraph {
         let graph = SPPFGraph()
         let startSymbol = grammar.start.name
-        let n = tokens.count
+        let n = tokenCount
 
         // Look for completed start productions spanning the full input.
         let startBSRs = bsr.filter { entry in

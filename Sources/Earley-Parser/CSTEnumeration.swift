@@ -8,7 +8,6 @@
 
 import Foundation
 import Grammar
-import Tokenizer
 
 extension EarleyParser {
 
@@ -22,7 +21,10 @@ extension EarleyParser {
     /// - Parameters:
     ///   - node:   The SPPF graph node to expand.
     ///   - sppf:   The shared-packed-parse-forest graph.
-    ///   - tokens: Tokenised input (used to map token indices → `String.Index` ranges).
+    ///   - ranges: Per-token-index source ranges (`ranges[i]` is the `Range<String.Index>`
+    ///             of the token at index `i`) — used to map token indices → `String.Index`
+    ///             ranges. Sourced from whichever `TokenStream` drove the parse, so this
+    ///             file has no dependency on any concrete tokenizer's token type.
     ///   - string: The original input string.
     ///   - memo:   Memoisation table keyed by `GraphNode`.  An entry maps a node to
     ///             the list-of-alternatives already computed for it.  A sentinel value
@@ -30,7 +32,7 @@ extension EarleyParser {
     func extractNodeAlternatives(
         node: SPPFNode,
         sppf: SPPFGraph,
-        tokens: [Token],
+        ranges: [Range<String.Index>],
         string: String,
         memo: inout [SPPFNode: [[ParseTree]]?]
     ) -> [[ParseTree]] {
@@ -43,7 +45,7 @@ extension EarleyParser {
         // Mark as "in progress" to break cycles.
         memo[node] = .some(nil)         // Optional<[[ParseTree]]>.some(.none) == cycle sentinel
 
-        let result = _expandNode(node: node, sppf: sppf, tokens: tokens, string: string, memo: &memo)
+        let result = _expandNode(node: node, sppf: sppf, ranges: ranges, string: string, memo: &memo)
 
         memo[node] = .some(result)      // store the real result
         return result
@@ -54,7 +56,7 @@ extension EarleyParser {
     private func _expandNode(
         node: SPPFNode,
         sppf: SPPFGraph,
-        tokens: [Token],
+        ranges: [Range<String.Index>],
         string: String,
         memo: inout [SPPFNode: [[ParseTree]]?]
     ) -> [[ParseTree]] {
@@ -64,7 +66,7 @@ extension EarleyParser {
         // ── Leaf: terminal token ───────────────────────────────────────────────
         case let .leaf(_, leftExtent, rightExtent):
             let range = charRange(left: leftExtent, right: rightExtent,
-                                  tokens: tokens, string: string)
+                                  ranges: ranges, string: string)
             return [[.leaf(range)]]
 
         // ── Symbol: non-terminal ───────────────────────────────────────────────
@@ -76,7 +78,7 @@ extension EarleyParser {
             for child in children {
                 guard case .packed = child else { continue }
                 let packedAlts = extractNodeAlternatives(
-                    node: child, sppf: sppf, tokens: tokens, string: string, memo: &memo)
+                    node: child, sppf: sppf, ranges: ranges, string: string, memo: &memo)
                 for alt in packedAlts {
                     alternatives.append([.node(nonTerminal, children: alt)])
                 }
@@ -94,7 +96,7 @@ extension EarleyParser {
             for child in children {
                 guard case .packed = child else { continue }
                 let packedAlts = extractNodeAlternatives(
-                    node: child, sppf: sppf, tokens: tokens, string: string, memo: &memo)
+                    node: child, sppf: sppf, ranges: ranges, string: string, memo: &memo)
                 alternatives.append(contentsOf: packedAlts)
             }
             return alternatives
@@ -104,7 +106,7 @@ extension EarleyParser {
             return _expandPackedNode(
                 label: label,
                 leftExtent: leftExtent, rightExtent: rightExtent, pivot: pivot,
-                node: node, sppf: sppf, tokens: tokens, string: string, memo: &memo)
+                node: node, sppf: sppf, ranges: ranges, string: string, memo: &memo)
         }
     }
 
@@ -115,7 +117,7 @@ extension EarleyParser {
         pivot: Int,
         node: SPPFNode,
         sppf: SPPFGraph,
-        tokens: [Token],
+        ranges: [Range<String.Index>],
         string: String,
         memo: inout [SPPFNode: [[ParseTree]]?]
     ) -> [[ParseTree]] {
@@ -161,7 +163,7 @@ extension EarleyParser {
         let leftAlts: [[ParseTree]]
         if let left = leftChild {
             leftAlts = extractNodeAlternatives(
-                node: left, sppf: sppf, tokens: tokens, string: string, memo: &memo)
+                node: left, sppf: sppf, ranges: ranges, string: string, memo: &memo)
         } else {
             leftAlts = [[]]
         }
@@ -169,7 +171,7 @@ extension EarleyParser {
         let rightAlts: [[ParseTree]]
         if let right = rightChild {
             rightAlts = extractNodeAlternatives(
-                node: right, sppf: sppf, tokens: tokens, string: string, memo: &memo)
+                node: right, sppf: sppf, ranges: ranges, string: string, memo: &memo)
         } else {
             rightAlts = [[]]
         }
@@ -204,17 +206,19 @@ extension EarleyParser {
         }
     }
 
-    func charRange(left: Int, right: Int, tokens: [Token], string: String) -> Range<String.Index> {
+    /// Maps a `[leftExtent, rightExtent)` token-index span to the `Range<String.Index>`
+    /// it covers, using the per-token ranges collected while scanning.
+    func charRange(left: Int, right: Int, ranges: [Range<String.Index>], string: String) -> Range<String.Index> {
         if left == right {
-            if left < tokens.count {
-                let idx = tokens[left].range.lowerBound
+            if left < ranges.count {
+                let idx = ranges[left].lowerBound
                 return idx..<idx
             } else {
                 return string.endIndex..<string.endIndex
             }
         } else {
-            let start = tokens[left].range.lowerBound
-            let end   = tokens[right - 1].range.upperBound
+            let start = ranges[left].lowerBound
+            let end   = ranges[right - 1].upperBound
             return start..<end
         }
     }
