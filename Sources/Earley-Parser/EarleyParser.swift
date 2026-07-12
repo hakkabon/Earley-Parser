@@ -132,9 +132,13 @@ public struct EarleyParser {
                 // b == a[j+1]
 				let next = item.nextSymbol,
 				case .terminal(let terminal) = next,
-                // Note that the implementation of == in `Terminal` includes literal (char by char) equality
-                // as well as substring ranges and regex definitions.
-				terminal == token
+                // `terminal` is the grammar's expected symbol (a literal, character
+                // range, regex, or list — already resolved from any `lexical { }`
+                // declaration by StandardNotation); `token` is the concrete lexeme
+                // the Lexer produced. Terminal.== is strict structural equality and
+                // does not do this kind of pattern-vs-lexeme matching; matches(_:)
+                // is the asymmetric check meant for exactly this call site.
+				terminal.matches(token)
 			else {
 				return
 			}
