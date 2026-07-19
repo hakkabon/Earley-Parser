@@ -5,10 +5,7 @@ import PackageDescription
 
 let package = Package(
     name: "Earley-Parser",
-    platforms: [
-        .macOS(.v11),
-        .iOS(.v14),
-    ],
+    platforms: [.macOS(.v11), .iOS(.v14)],
     products: [
         .library(name: "Earley-Parser", targets: ["Earley-Parser"]),
     ],
@@ -19,6 +16,7 @@ let package = Package(
         .package(url: "https://github.com/hakkabon/Lexer.git", branch: "main"),
         .package(url: "https://github.com/hakkabon/GrammarDiagram.git", branch: "main"),
         .package(url: "https://github.com/hakkabon/TerminalColors.git", from: "0.0.1"),
+        .package(url: "https://github.com/hakkabon/Parser.git", branch: "main"),
     ],
     targets: [
         .target(
@@ -28,6 +26,7 @@ let package = Package(
                 .product(name: "Lexer", package: "Lexer"),
                 .product(name: "GrammarDiagram", package: "GrammarDiagram"),
                 .product(name: "TerminalColors", package: "TerminalColors"),
+                .product(name: "Parser", package: "Parser"),
             ]
         ),
         .testTarget(
@@ -35,6 +34,7 @@ let package = Package(
             dependencies: [
                 "Earley-Parser",
                 .product(name: "Grammar", package: "Grammar"),
+                .product(name: "Parser", package: "Parser"),
             ]
         ),
         // Move executable target to its destination (grammar toolbox) when library confirmed working.
@@ -46,6 +46,7 @@ let package = Package(
                 .product(name: "ShellOut", package: "shellout"),
                 .product(name: "Grammar", package: "Grammar"),
                 .product(name: "GrammarDiagram", package: "GrammarDiagram"),
+                .product(name: "Parser", package: "Parser"),
             ]
         ),
     ]

@@ -9,6 +9,7 @@
 import Foundation
 import Grammar
 import OSLog
+import Parser
 
 /// A parser implementation modelled after the Earley algorithm.
 /// This implementation is almost literally taken from Grune & Jacobs [3] as described
@@ -76,8 +77,8 @@ public struct EarleyParser {
     /// that can derive an empty string ε.
     /// 3. BSR Addition (for nullables): It calls bsrAdd(X ::= αY·β, i, j, j). This records a derivation step.
     /// The span is (j, j), indicating that the non-terminal Y derived the empty string at position j
-    private func predict(item: ParseStateItem, currentIndex: Int, productions: [NonTerminal: [Production]],  allStates: [Set<ParseStateItem>]) -> ([ParseStateItem], Set<BSR>) {
-        var bsr = Set<BSR>()
+    private func predict(item: ParseStateItem, currentIndex: Int, productions: [NonTerminal: [Production]],  allStates: [Set<ParseStateItem>]) -> ([ParseStateItem], Set<BSR<NodeLabel>>) {
+        var bsr = Set<BSR<NodeLabel>>()
 
         guard
 			let symbol = item.nextSymbol,
@@ -123,8 +124,8 @@ public struct EarleyParser {
     /// - i is the start index of the item.
     /// - j is the current position in the input string.
     /// The Scanner performs the following actions:
-    func scan(state: Set<ParseStateItem>, token: Terminal, currentIndex: Int) -> (Set<ParseStateItem>, Set<BSR>) {
-        var bsr = Set<BSR>()
+    func scan(state: Set<ParseStateItem>, token: Terminal, currentIndex: Int) -> (Set<ParseStateItem>, Set<BSR<NodeLabel>>) {
+        var bsr = Set<BSR<NodeLabel>>()
 		let items = state.reduce(into: Set<ParseStateItem>()) { partialResult, item in
 			guard
                 // Check that the next symbol of the production is a terminal and
@@ -169,7 +170,7 @@ public struct EarleyParser {
     /// - X ::= α· is the completed production rule. i is the start index of the substring derived by X.
     /// - j is the end index of the substring derived by X.
     /// The Completer performs the following actions:
-	private func complete(item: ParseStateItem, currentIndex: Int, allStates: [Set<ParseStateItem>]) -> ([ParseStateItem], Set<BSR>) {
+	private func complete(item: ParseStateItem, currentIndex: Int, allStates: [Set<ParseStateItem>]) -> ([ParseStateItem], Set<BSR<NodeLabel>>) {
 		guard item.isCompleted else {
 			return ([], [])
 		}
@@ -188,7 +189,7 @@ public struct EarleyParser {
         //   leftExtent = k  (start of the waiting item Y ::= δ·Xμ)
         //   pivot      = i  (start of the completed item X ::= α·, i.e. item.startTokenIndex)
         //   rightExtent= j  (current position)
-        var bsr = Set<BSR>()
+        var bsr = Set<BSR<NodeLabel>>()
         for (stateItem, advancedItem) in zip(stateItems, advancedItems) {
             if let bsrItem = bsrAdd(item: advancedItem,                     // Y ::= δX·μ
                                     leftExtent: stateItem.startTokenIndex,  // k
@@ -218,10 +219,10 @@ public struct EarleyParser {
 
     // The Completer/Predictor Loop
     // `currentIndex` is the index of the state currently being built (i.e. stateCollection.count after appending).
-    func processState(productions: [NonTerminal: [Production]], allStates: [Set<ParseStateItem>], knownItems: Set<ParseStateItem>, newItems: Set<ParseStateItem>, currentIndex: Int) -> (Set<ParseStateItem>, Set<BSR>) {
+    func processState(productions: [NonTerminal: [Production]], allStates: [Set<ParseStateItem>], knownItems: Set<ParseStateItem>, newItems: Set<ParseStateItem>, currentIndex: Int) -> (Set<ParseStateItem>, Set<BSR<NodeLabel>>) {
 		var addedItems: Set<ParseStateItem> = newItems
 		var knownItems: Set<ParseStateItem> = knownItems
-        var bsrSet = Set<BSR>()
+        var bsrSet = Set<BSR<NodeLabel>>()
 
 		repeat {
 			addedItems = addedItems.reduce(into: Set<ParseStateItem>()) { (addedItems, item) in
@@ -269,36 +270,36 @@ extension EarleyParser {
     ///   - leftExtent:  i — start position of the rule X.
     ///   - pivot:       k — boundary between the left and right children.
     ///   - rightExtent: j — end position of the current derivation step.
-    private func bsrAdd(item: ParseStateItem, leftExtent: Int, pivot: Int, rightExtent: Int) -> BSR? {
+    private func bsrAdd(item: ParseStateItem, leftExtent: Int, pivot: Int, rightExtent: Int) -> BSR<NodeLabel>? {
         
         // Get the symbols before and after the dot: X ::= α·β
-        let (alpha, beta, _) = item.split
+        let (alpha, beta, dotPosition) = item.split
 
         // Nothing to record when the dot is at the very start (α is empty).
         guard !alpha.isEmpty else { return nil }
 
         // Case 1: β = ε — completed rule.
-        // Insert pnode (X ::= αβ, i, k, j) representing the full derivation of X.
+        // Insert (X ::= αβ, i, k, j) representing the full derivation of X.
+        // Case 2: |α| > 1 — intermediate derivation.
+        // Insert (X ::= α·β, i, k, j) to represent the partial left spine.
+        //
+        // Both cases construct the same `NodeLabel(goal:symbols:position:)` —
+        // `symbols` is always the production's full RHS and `position` is the
+        // dot, so `label.isCompleted` (position == symbols.count) is what
+        // used to be tagged `.pnode`, and a `position` strictly between 1 and
+        // symbols.count is what used to be tagged `.snode`. There is no need
+        // for two separate wrapper types: `alpha = label.symbols.prefix(label.position)`
+        // already recovers whichever of the two the caller needs.
         if beta.isEmpty {
-            let bsr = BSR(
-                node: .pnode(ProductionNode(goal: item.production.goal, symbols: item.production.rule)),
-                leftExtent: leftExtent,
-                pivot: pivot,
-                rightExtent: rightExtent
-            )
+            let label = NodeLabel(goal: item.production.goal, symbols: item.production.rule, position: dotPosition)
+            let bsr = BSR(label: label, leftExtent: leftExtent, pivot: pivot, rightExtent: rightExtent)
             Logger.bsr.trace("add BSR pnode \(bsr) [β=ε, complete]")
             return bsr
         }
 
-        // Case 2: |α| > 1 — intermediate derivation.
-        // Insert snode (α, i, k, j) to represent the partial left spine.
         if alpha.count > 1 {
-            let bsr = BSR(
-                node: .snode(SymbolNode(symbols: alpha)),
-                leftExtent: leftExtent,
-                pivot: pivot,
-                rightExtent: rightExtent
-            )
+            let label = NodeLabel(goal: item.production.goal, symbols: item.production.rule, position: dotPosition)
+            let bsr = BSR(label: label, leftExtent: leftExtent, pivot: pivot, rightExtent: rightExtent)
             Logger.bsr.trace("add BSR snode \(bsr) [|α|>1, intermediate]")
             return bsr
         }

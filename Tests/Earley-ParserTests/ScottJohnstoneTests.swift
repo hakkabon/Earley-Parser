@@ -1,11 +1,12 @@
 import Testing
 @testable import Earley_Parser
 import Grammar
+import Parser
 
 // MARK: - Helpers
 
 /// Convenience: parse a string and return the ParseResult, failing the test on error.
-private func parse(_ input: String, grammar: Grammar) throws -> ParseResult {
+private func parse(_ input: String, grammar: Grammar) throws -> ParseResult<NodeLabel> {
     let parser = EarleyParser(grammar: grammar)
     return try parser.parse(input)
 }

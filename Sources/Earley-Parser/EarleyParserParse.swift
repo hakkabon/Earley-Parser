@@ -1,5 +1,5 @@
 //
-//  Parse.swift
+//  EarleyParserParse.swift
 //  Earley-Parser
 //
 //  Created by Ulf Akerstedt-Inoue on 2024/02/18.
@@ -10,6 +10,7 @@ import Foundation
 import Grammar
 import Lexer
 import OSLog
+import Parser
 
 let symbols = [
     "//", "/*", "*\\", ":", ":=", "::=", ",", "->", ".", "\"", "<=", ">=", "==", "!=", "!",
@@ -19,6 +20,8 @@ let symbols = [
 
 extension EarleyParser: GeneralizedParser {
 
+    public typealias Label = NodeLabel
+
     /// Parses `string` by scanning it with GrammarTokenizer's general-purpose
     /// `Tokenizer` (configured with this module's fixed `symbols` list) and
     /// delegating to `parse(stream:)`.
@@ -26,7 +29,7 @@ extension EarleyParser: GeneralizedParser {
     /// This preserves the exact tokenization this method always used; it is
     /// now a thin convenience over the stream-based entry point rather than
     /// its own separate implementation.
-    public func parse(_ string: String) throws -> ParseResult {
+    public func parse(_ string: String) throws -> ParseResult<NodeLabel> {
         try parse(stream: TokenizerStream(source: string, symbols: Set(symbols), keywords: []))
     }
 
@@ -40,7 +43,7 @@ extension EarleyParser: GeneralizedParser {
     /// - Returns: A `ParseResult` describing success, the BSR set, and the SPPF graph.
     /// - Throws: A `SyntaxError` if the input is not in the recognised language,
     ///   or whatever error `stream.terminal(at:)` throws for a lexical failure.
-    public func parse<S: TokenStream>(stream: S) throws -> ParseResult {
+    public func parse<S: TokenStream>(stream: S) throws -> ParseResult<NodeLabel> {
 
         let nonTerminalProductions = Dictionary(grouping: grammar.productions, by: {$0.goal})
 
@@ -64,7 +67,7 @@ extension EarleyParser: GeneralizedParser {
         var stateCollection: [Set<ParseStateItem>] = [initState]
         stateCollection.reserveCapacity(stream.count + 1)
 
-        var bsrSet = Set<BSR>(bsr)
+        var bsrSet = Set<BSR<NodeLabel>>(bsr)
 
         var currentIndex: String.Index = stream.source.startIndex
 

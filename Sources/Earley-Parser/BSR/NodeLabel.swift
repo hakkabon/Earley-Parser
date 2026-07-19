@@ -8,8 +8,13 @@
 
 import Foundation
 import Grammar
+import Parser
 
-public struct NodeLabel: Codable {
+
+/// `NodeLabel` already carries exactly what `SPPFLabel` needs — `goal`,
+/// `symbols` (the full production RHS), and `position` (the dot) — so
+/// conformance is free.
+public struct NodeLabel: Codable, SPPFLabel {
     public let goal: NonTerminal
     public let symbols: [Symbol]
     public let position: Int
