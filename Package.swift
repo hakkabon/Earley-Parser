@@ -8,6 +8,7 @@ let package = Package(
     platforms: [.macOS(.v11), .iOS(.v14)],
     products: [
         .library(name: "Earley-Parser", targets: ["Earley-Parser"]),
+        .executable(name: "earley-gtool", targets: ["earley-gtool"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.6.2"),
@@ -39,7 +40,7 @@ let package = Package(
         ),
         // Move executable target to its destination (grammar toolbox) when library confirmed working.
         .executableTarget(
-            name: "gtool",
+            name: "earley-gtool",
             dependencies: [
                 "Earley-Parser",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
@@ -47,7 +48,8 @@ let package = Package(
                 .product(name: "Grammar", package: "Grammar"),
                 .product(name: "GrammarDiagram", package: "GrammarDiagram"),
                 .product(name: "Parser", package: "Parser"),
-            ]
+            ],
+            path: "Sources/gtool"
         ),
     ]
 )
