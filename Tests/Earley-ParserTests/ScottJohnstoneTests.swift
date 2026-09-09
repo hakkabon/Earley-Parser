@@ -267,3 +267,14 @@ func sppf_epsilonLeafUsesConfiguredMetaCharacter() throws {
     }
 }
 
+@Test("Earley exports the production-aware Parser 0.3 contract")
+func portableParserContract() throws {
+    let grammar = try Grammar(bnf: "<S> ::= 'a'", start: "S")
+    let result = try EarleyParser(grammar: grammar).parse("a")
+    let snapshot = try result.contractSnapshot(
+        engine: .init(identity: "earley", displayName: "Earley", algorithm: "earley")
+    )
+
+    #expect(snapshot.status == .accepted)
+    #expect(snapshot.forest?.nodes.contains { $0.productionID != nil } == true)
+}

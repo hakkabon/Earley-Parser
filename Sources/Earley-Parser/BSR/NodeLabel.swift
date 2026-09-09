@@ -14,10 +14,15 @@ import Parser
 /// `NodeLabel` already carries exactly what `SPPFLabel` needs — `goal`,
 /// `symbols` (the full production RHS), and `position` (the dot) — so
 /// conformance is free.
-public struct NodeLabel: Codable, SPPFLabel {
+public struct NodeLabel: Codable, ProductionIdentifiedSPPFLabel {
     public let goal: NonTerminal
     public let symbols: [Symbol]
     public let position: Int
+
+    /// Stable semantic identity shared by equivalent productions in other engines.
+    public var productionID: GrammarProductionID {
+        GrammarProductionID(goal: goal, symbols: symbols)
+    }
         
     var isCompleted: Bool {
         return !symbols.indices.contains(position)
