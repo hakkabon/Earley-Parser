@@ -2,6 +2,10 @@
 
 A Swift implementation of the Earley parsing algorithm with full support for ambiguous grammars, nullable productions, and left/right recursion. The parser produces a **Shared Packed Parse Forest (SPPF)** that compactly represents all possible parse trees for an input string, including all derivations for ambiguous grammars.
 
+Release 0.2.1 owns an executable, evidence-checked Earley forest workload. Run
+`swift run -c release earley-microbenchmark [report.json]`; the report preserves
+the repository-owned grammar, input, measured boundary, BSR, and forest counters.
+
 [![Swift 5.9+](https://img.shields.io/badge/Swift-5.9%2B-orange.svg)](https://swift.org)  
 [![Platforms](https://img.shields.io/badge/platforms-macOS%2011%20%7C%20iOS%2014-blue.svg)](https://developer.apple.com/swift/)  
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)  
