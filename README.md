@@ -1,5 +1,9 @@
 # Earley-Parser
 
+`EarleyIncrementalChart` retains native chart facts together with their token
+and chart dependencies. Editing a stable token invalidates only its direct
+users and their transitive completer/predictor dependants.
+
 A Swift implementation of the Earley parsing algorithm with full support for ambiguous grammars, nullable productions, and left/right recursion. The parser produces a **Shared Packed Parse Forest (SPPF)** that compactly represents all possible parse trees for an input string, including all derivations for ambiguous grammars.
 
 Release 0.2.1 owns an executable, evidence-checked Earley forest workload. Run
