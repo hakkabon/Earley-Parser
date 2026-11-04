@@ -2,7 +2,12 @@
 
 `EarleyIncrementalChart` retains native chart facts together with their token
 and chart dependencies. Editing a stable token invalidates only its direct
-users and their transitive completer/predictor dependants.
+users and their transitive completer/predictor dependants. Phase 11 binds those
+facts to a stable grammar identity and publishes retained, removed, and rebuilt
+chart facts through shared `IncrementalExecutionEvidence`; grammar replacement
+fails closed and clears the chart.
+
+See [Native generalized reuse](Documentation/NativeGeneralizedReuse.md).
 
 A Swift implementation of the Earley parsing algorithm with full support for ambiguous grammars, nullable productions, and left/right recursion. The parser produces a **Shared Packed Parse Forest (SPPF)** that compactly represents all possible parse trees for an input string, including all derivations for ambiguous grammars.
 

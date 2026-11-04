@@ -1,4 +1,18 @@
 import Foundation
+import IncrementalParsing
+import Grammar
+
+extension EarleyParser {
+    /// Stable semantic identity used to guard native chart reuse.
+    public var incrementalArtifactIdentity: IncrementalArtifactIdentity {
+        func frame(_ value: String) -> String { "\(value.utf8.count):\(value)" }
+        let productions = grammar.productions.map {
+            GrammarProductionID(goal: $0.goal, symbols: $0.rule).rawValue
+        }.sorted().map(frame).joined()
+        let fingerprint = "earley-grammar-v1;S\(frame(grammar.start.name));P\(frame(productions))"
+        return .init(id: "earley.grammar", revision: 0, fingerprint: fingerprint)
+    }
+}
 
 /// Stable identity supplied by an incremental token stream.
 public struct EarleyTokenIdentity: Hashable, Sendable {
@@ -36,6 +50,20 @@ public struct EarleyChartFact<Value> {
 public struct EarleyChartInvalidation: Sendable {
     public let removed: Set<EarleyChartFactID>
     public let retained: Set<EarleyChartFactID>
+
+    /// Projects native chart invalidation into the shared evidence vocabulary
+    /// after the caller has rebuilt the missing closure.
+    public func executionEvidence(rebuiltFactCount: Int) -> IncrementalExecutionEvidence {
+        precondition(rebuiltFactCount >= 0, "rebuilt fact count cannot be negative")
+        return .init(
+            strategy: .incremental,
+            measurements: [.init(
+                dimension: .chartFacts,
+                reused: retained.count,
+                rebuilt: rebuiltFactCount,
+                removed: removed.count,
+                strategy: "dependency-indexed-invalidation")])
+    }
 }
 
 /// Engine-owned incremental Earley chart storage.
@@ -47,10 +75,39 @@ public struct EarleyChartInvalidation: Sendable {
 public final class EarleyIncrementalChart<Value> {
     private var facts: [EarleyChartFactID: EarleyChartFact<Value>] = [:]
     private var reverseDependencies: [EarleyChartFactID: Set<EarleyChartFactID>] = [:]
+    public private(set) var artifactIdentity: IncrementalArtifactIdentity?
 
     public init() {}
     public var count: Int { facts.count }
+    public var factIDs: Set<EarleyChartFactID> { Set(facts.keys) }
     public subscript(id: EarleyChartFactID) -> EarleyChartFact<Value>? { facts[id] }
+
+    /// Binds retained facts to the grammar/table artifact that produced them.
+    /// A first binding is a full baseline; changing artifacts drops every fact
+    /// and reports an explicit fallback rather than attempting unsafe reuse.
+    @discardableResult
+    public func bind(
+        to artifact: IncrementalArtifactIdentity
+    ) -> IncrementalExecutionEvidence? {
+        if let current = artifactIdentity, current == artifact { return nil }
+        let removed = facts.count
+        removeAll()
+        let wasBound = artifactIdentity != nil
+        artifactIdentity = artifact
+        let measurement = ReuseMeasurement(
+            dimension: .chartFacts,
+            reused: 0,
+            rebuilt: 0,
+            removed: removed,
+            strategy: "dependency-indexed-invalidation")
+        if wasBound {
+            return .init(
+                strategy: .fallback,
+                fallback: .incompatibleArtifact,
+                measurements: [measurement])
+        }
+        return .init(strategy: .full, measurements: [measurement])
+    }
 
     public func record(_ fact: EarleyChartFact<Value>) {
         if let old = facts[fact.id] {
@@ -89,5 +146,10 @@ public final class EarleyIncrementalChart<Value> {
     public func removeAll() {
         facts.removeAll()
         reverseDependencies.removeAll()
+    }
+
+    public func reset() {
+        removeAll()
+        artifactIdentity = nil
     }
 }
