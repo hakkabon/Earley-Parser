@@ -157,8 +157,9 @@ extension EarleyParser: GeneralizedParser {
             })
         }
 
+        let upperBound = index < string.endIndex ? string.index(after: index) : index
         return SyntaxError(
-            range: index ..< string.index(after: index),
+            range: index ..< upperBound,
             in: string,
             reason: context.isEmpty ? .unexpectedToken : .unmatchedPattern,
             context: context
