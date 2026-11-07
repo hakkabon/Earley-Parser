@@ -5,12 +5,9 @@ import Grammar
 extension EarleyParser {
     /// Stable semantic identity used to guard native chart reuse.
     public var incrementalArtifactIdentity: IncrementalArtifactIdentity {
-        func frame(_ value: String) -> String { "\(value.utf8.count):\(value)" }
-        let productions = grammar.productions.map {
-            GrammarProductionID(goal: $0.goal, symbols: $0.rule).rawValue
-        }.sorted().map(frame).joined()
-        let fingerprint = "earley-grammar-v1;S\(frame(grammar.start.name));P\(frame(productions))"
-        return .init(id: "earley.grammar", revision: 0, fingerprint: fingerprint)
+        .init(
+            id: "earley.grammar", revision: 0,
+            fingerprint: grammar.incrementalSemanticFingerprint)
     }
 }
 
@@ -31,19 +28,28 @@ public struct EarleyChartFact<Value> {
     public let id: EarleyChartFactID
     public let value: Value
     public let tokenDependencies: Set<EarleyTokenIdentity>
+    public let productionDependencies: Set<GrammarProductionID>
     public let factDependencies: Set<EarleyChartFactID>
 
     public init(
         id: EarleyChartFactID,
         value: Value,
         tokenDependencies: Set<EarleyTokenIdentity> = [],
+        productionDependencies: Set<GrammarProductionID> = [],
         factDependencies: Set<EarleyChartFactID> = []
     ) {
         self.id = id
         self.value = value
         self.tokenDependencies = tokenDependencies
+        self.productionDependencies = productionDependencies
         self.factDependencies = factDependencies
     }
+}
+
+public struct EarleyGrammarTransition: Sendable {
+    public let invalidation: EarleyChartInvalidation
+    public let evidence: IncrementalExecutionEvidence
+    public let appliedIncrementally: Bool
 }
 
 /// Result of dependency-indexed chart invalidation.
@@ -123,9 +129,78 @@ public final class EarleyIncrementalChart<Value> {
 
     @discardableResult
     public func invalidate(tokens changedTokens: Set<EarleyTokenIdentity>) -> EarleyChartInvalidation {
-        var removed = Set(facts.values.lazy
+        let seeds = Set(facts.values.lazy
             .filter { !$0.tokenDependencies.isDisjoint(with: changedTokens) }
             .map(\.id))
+        return invalidate(seedFacts: seeds)
+    }
+
+    /// Invalidates facts justified by changed grammar productions and their
+    /// transitive chart dependents.
+    @discardableResult
+    public func invalidate(
+        productions changedProductions: Set<GrammarProductionID>
+    ) -> EarleyChartInvalidation {
+        let seeds = Set(facts.values.lazy
+            .filter { !$0.productionDependencies.isDisjoint(with: changedProductions) }
+            .map(\.id))
+        return invalidate(seedFacts: seeds)
+    }
+
+    /// Transitions retained chart storage to a new grammar artifact when the
+    /// supplied delta proves its exact source and target fingerprints.
+    public func transition(
+        to artifact: IncrementalArtifactIdentity,
+        change: GrammarChangeSet,
+        rebuiltFactCount: Int = 0
+    ) -> EarleyGrammarTransition {
+        guard artifactIdentity?.fingerprint == change.sourceFingerprint,
+              artifact.fingerprint == change.targetFingerprint else {
+            let oldIDs = Set(facts.keys)
+            let wasBound = artifactIdentity != nil
+            removeAll()
+            artifactIdentity = artifact
+            let measurement = ReuseMeasurement(
+                dimension: .chartFacts, reused: 0, rebuilt: rebuiltFactCount,
+                removed: oldIDs.count,
+                strategy: "grammar-dependency-invalidation")
+            let evidence = wasBound
+                ? IncrementalExecutionEvidence(
+                    strategy: .fallback,
+                    fallback: .incompatibleArtifact,
+                    measurements: [measurement])
+                : IncrementalExecutionEvidence(
+                    strategy: .full,
+                    measurements: [measurement])
+            return .init(
+                invalidation: .init(removed: oldIDs, retained: []),
+                evidence: evidence,
+                appliedIncrementally: false)
+        }
+
+        let invalidation = invalidate(
+            productions: change.invalidatedProductionIDSet)
+        artifactIdentity = artifact
+        let chartEvidence = invalidation.executionEvidence(
+            rebuiltFactCount: rebuiltFactCount)
+        let grammarMeasurement = ReuseMeasurement(
+            dimension: .grammarProductions,
+            reused: change.retainedProductionIDs.count,
+            rebuilt: change.addedProductionIDs.count,
+            removed: change.removedProductionIDs.count,
+            strategy: "structural-grammar-delta")
+        return .init(
+            invalidation: invalidation,
+            evidence: .init(
+                strategy: .incremental,
+                measurements: chartEvidence.measurements + [grammarMeasurement]),
+            appliedIncrementally: true)
+    }
+
+    private func invalidate(
+        seedFacts: Set<EarleyChartFactID>
+    ) -> EarleyChartInvalidation {
+        var removed = seedFacts
         var work = Array(removed)
         while let invalid = work.popLast() {
             for dependent in reverseDependencies[invalid, default: []] where removed.insert(dependent).inserted {

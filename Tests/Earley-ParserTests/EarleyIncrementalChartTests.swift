@@ -106,4 +106,63 @@ final class EarleyIncrementalChartTests: XCTestCase {
         XCTAssertEqual(evidence.measurements.first?.rebuilt, 2)
         XCTAssertEqual(evidence.measurements.first?.removed, 2)
     }
+
+    func testGrammarTransitionRetainsUnrelatedChartFacts() throws {
+        let old = try Grammar(bnf: """
+            S ::= B
+            B ::= 'b'
+            U ::= 'u'
+            """, start: "S")
+        let changed = try Grammar(bnf: """
+            S ::= B
+            B ::= 'b' | 'other'
+            U ::= 'u'
+            """, start: "S")
+        let oldParser = EarleyParser(grammar: old)
+        let changedParser = EarleyParser(grammar: changed)
+        let chart = EarleyIncrementalChart<String>()
+        _ = chart.bind(to: oldParser.incrementalArtifactIdentity)
+
+        let root = EarleyChartFactID("root")
+        let bFact = EarleyChartFactID("B")
+        let unrelated = EarleyChartFactID("U")
+        chart.record(.init(
+            id: bFact, value: "B",
+            productionDependencies: [GrammarProductionID(old.productions[1])]))
+        chart.record(.init(
+            id: root, value: "S",
+            productionDependencies: [GrammarProductionID(old.productions[0])],
+            factDependencies: [bFact]))
+        chart.record(.init(
+            id: unrelated, value: "U",
+            productionDependencies: [GrammarProductionID(old.productions[2])]))
+
+        let transition = chart.transition(
+            to: changedParser.incrementalArtifactIdentity,
+            change: old.changeSet(to: changed),
+            rebuiltFactCount: 2)
+
+        XCTAssertTrue(transition.appliedIncrementally)
+        XCTAssertEqual(transition.invalidation.removed, [root, bFact])
+        XCTAssertEqual(transition.invalidation.retained, [unrelated])
+        XCTAssertEqual(transition.evidence.strategy, .incremental)
+        XCTAssertEqual(transition.evidence.measurements.first?.reused, 1)
+    }
+
+    func testGrammarTransitionFailsClosedForWrongDelta() throws {
+        let old = try Grammar(bnf: "S ::= 'a'", start: "S")
+        let unrelated = try Grammar(bnf: "S ::= 'c'", start: "S")
+        let chart = EarleyIncrementalChart<String>()
+        let currentArtifact = EarleyParser(grammar: old).incrementalArtifactIdentity
+        _ = chart.bind(to: currentArtifact)
+        chart.record(.init(id: .init("fact"), value: "value"))
+
+        let transition = chart.transition(
+            to: currentArtifact,
+            change: old.changeSet(to: unrelated))
+
+        XCTAssertFalse(transition.appliedIncrementally)
+        XCTAssertEqual(transition.evidence.strategy, .fallback)
+        XCTAssertEqual(chart.count, 0)
+    }
 }
