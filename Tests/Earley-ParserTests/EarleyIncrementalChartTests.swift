@@ -4,6 +4,61 @@ import Grammar
 @testable import Earley_Parser
 
 final class EarleyIncrementalChartTests: XCTestCase {
+    func testLiveSessionResumesChartAndMatchesCleanForest() throws {
+        let grammar = try Grammar(
+            bnf: "S ::= 'a' S | 'b'", start: "S")
+        let session = EarleyIncrementalSession(grammar: grammar)
+
+        let first = try session.parse("a a b")
+        let changed = try session.parse("a a a b")
+        let clean = try EarleyParser(grammar: grammar).parse("a a a b")
+
+        XCTAssertTrue(first.result.isSuccessful)
+        XCTAssertTrue(changed.result.isSuccessful)
+        XCTAssertEqual(changed.evidence.strategy, .incremental)
+        XCTAssertGreaterThan(changed.reusedChartColumnCount, 0)
+        XCTAssertGreaterThan(changed.rebuiltChartColumnCount, 0)
+        XCTAssertGreaterThan(
+            changed.evidence.measurements.first {
+                $0.dimension == .chartFacts
+            }?.reused ?? 0,
+            0)
+        XCTAssertEqual(changed.result.bsr, clean.bsr)
+        XCTAssertEqual(
+            try changed.result.sppfGraph?.portableSnapshot(),
+            try clean.sppfGraph?.portableSnapshot())
+    }
+
+    func testLiveSessionReusesWholeChartForUnchangedInput() throws {
+        let grammar = try Grammar(
+            bnf: "S ::= 'a' S | 'b'", start: "S")
+        let session = EarleyIncrementalSession(grammar: grammar)
+        _ = try session.parse("a b")
+        let unchanged = try session.parse("a b")
+
+        XCTAssertEqual(unchanged.evidence.strategy, .incremental)
+        XCTAssertEqual(unchanged.reusedChartColumnCount, 3)
+        XCTAssertEqual(unchanged.rebuiltChartColumnCount, 0)
+        XCTAssertEqual(
+            unchanged.evidence.measurements.first {
+                $0.dimension == .chartFacts
+            }?.rebuilt,
+            0)
+    }
+
+    func testLiveSessionFailsClosedAfterInvalidInput() throws {
+        let grammar = try Grammar(
+            bnf: "S ::= 'a' S | 'b'", start: "S")
+        let session = EarleyIncrementalSession(grammar: grammar)
+        _ = try session.parse("a b")
+
+        XCTAssertThrowsError(try session.parse("a x"))
+        let restarted = try session.parse("a b")
+
+        XCTAssertEqual(restarted.evidence.strategy, .full)
+        XCTAssertEqual(restarted.reusedChartColumnCount, 0)
+    }
+
     func testTokenInvalidationPropagatesOnlyThroughDependentChartFacts() {
         let chart = EarleyIncrementalChart<String>()
         let left = EarleyChartFactID("scan:left")
