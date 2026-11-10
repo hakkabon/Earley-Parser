@@ -11,6 +11,7 @@ public struct EarleyRecoveryResult {
     public let recoveryEdits: [RecoveryEdit]
     public let exploredStates: Int
     public let reachedSearchLimit: Bool
+    public let quality: GeneralizedRepairQuality
 
     public init(
         status: ParseStatus,
@@ -18,7 +19,8 @@ public struct EarleyRecoveryResult {
         diagnostics: [ParseDiagnostic],
         recoveryEdits: [RecoveryEdit],
         exploredStates: Int,
-        reachedSearchLimit: Bool
+        reachedSearchLimit: Bool,
+        quality: GeneralizedRepairQuality? = nil
     ) {
         self.status = status
         self.parseResult = parseResult
@@ -26,6 +28,16 @@ public struct EarleyRecoveryResult {
         self.recoveryEdits = recoveryEdits
         self.exploredStates = exploredStates
         self.reachedSearchLimit = reachedSearchLimit
+        self.quality = quality ?? .init(
+            editCost: recoveryEdits.count,
+            insertionCount: recoveryEdits.reduce(0) {
+                if case .insert = $1 { return $0 + 1 }; return $0
+            },
+            deletionCount: recoveryEdits.reduce(0) {
+                if case .delete = $1 { return $0 + 1 }; return $0
+            },
+            exploredStates: exploredStates,
+            reachedSearchLimit: reachedSearchLimit)
     }
 }
 
@@ -45,12 +57,14 @@ public extension EarleyParser {
     func parseRecovering(
         _ string: String,
         insertionCandidates: [Terminal]? = nil,
-        policy: GeneralizedRecoveryPolicy = .init()
+        policy: GeneralizedRecoveryPolicy = .init(),
+        searchSession: GeneralizedRecoverySearchSession<Terminal>? = nil
     ) throws -> EarleyRecoveryResult {
         try parseRecovering(
             stream: TokenizerStream(source: string, symbols: Set(symbols), keywords: []),
             insertionCandidates: insertionCandidates,
-            policy: policy
+            policy: policy,
+            searchSession: searchSession
         )
     }
 
@@ -61,7 +75,8 @@ public extension EarleyParser {
     func parseRecovering<S: TokenStream>(
         stream: S,
         insertionCandidates: [Terminal]? = nil,
-        policy: GeneralizedRecoveryPolicy = .init()
+        policy: GeneralizedRecoveryPolicy = .init(),
+        searchSession: GeneralizedRecoverySearchSession<Terminal>? = nil
     ) throws -> EarleyRecoveryResult {
         let entries = try stream.terminals()
         let original = entries.map(\.terminal)
@@ -76,16 +91,19 @@ public extension EarleyParser {
         let candidates = insertionCandidates ?? grammar.terminals
             .filter { !$0.isEmpty }
             .sorted { $0.description < $1.description }
-        let search = GeneralizedRecoverySearch<Terminal>()
-        let repair = search.recover(
-            original, insertionCandidates: candidates, policy: policy
-        ) { terminals in
+        let recognize: ([Terminal]) -> Bool = { terminals in
             let retry = RecoveryTokenStream(
                 source: stream.source,
                 entries: terminals.map { ($0, stream.source.endIndex..<stream.source.endIndex) }
             )
             return (try? parse(stream: retry).isSuccessful) == true
         }
+        let repair = searchSession.map {
+            $0.recover(original, insertionCandidates: candidates,
+                       policy: policy, recognizes: recognize)
+        } ?? GeneralizedRecoverySearch<Terminal>().recover(
+            original, insertionCandidates: candidates, policy: policy,
+            recognizes: recognize)
 
         guard repair.repairedInput != nil else {
             let diagnostic = ParseDiagnostic(
@@ -142,7 +160,7 @@ public extension EarleyParser {
         return .init(
             status: .recovered, parseResult: recovered, diagnostics: diagnostics,
             recoveryEdits: portableEdits, exploredStates: repair.exploredStates,
-            reachedSearchLimit: false
+            reachedSearchLimit: false, quality: repair.quality
         )
     }
 }

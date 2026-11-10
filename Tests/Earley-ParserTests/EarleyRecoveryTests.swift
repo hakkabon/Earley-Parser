@@ -48,4 +48,22 @@ struct EarleyRecoveryTests {
         #expect(result.reachedSearchLimit)
         #expect(result.exploredStates == 3)
     }
+
+    @Test("Recovery resumes the retained minimum-edit search")
+    func resumesSearch() throws {
+        let session = GeneralizedRecoverySearchSession<Terminal>()
+        let limited = try EarleyParser(grammar: grammar).parseRecovering(
+            "begin name end", insertionCandidates: [";", "."],
+            policy: .init(maximumEditCost: 2, maximumExploredStates: 3),
+            searchSession: session)
+        #expect(limited.reachedSearchLimit)
+
+        let resumed = try EarleyParser(grammar: grammar).parseRecovering(
+            "begin name end", insertionCandidates: [";", "."],
+            policy: .init(maximumEditCost: 2, maximumExploredStates: 100),
+            searchSession: session)
+        #expect(resumed.status == .recovered)
+        #expect(resumed.quality.editCost == 2)
+        #expect(resumed.quality.resumedStates == 3)
+    }
 }
