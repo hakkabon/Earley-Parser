@@ -50,6 +50,7 @@ public struct EarleyGrammarTransition: Sendable {
     public let invalidation: EarleyChartInvalidation
     public let evidence: IncrementalExecutionEvidence
     public let appliedIncrementally: Bool
+    public let convergence: GrammarEngineTransition?
 }
 
 /// Result of dependency-indexed chart invalidation.
@@ -154,6 +155,13 @@ public final class EarleyIncrementalChart<Value> {
         change: GrammarChangeSet,
         rebuiltFactCount: Int = 0
     ) -> EarleyGrammarTransition {
+        let sourceArtifact = artifactIdentity
+        let grammarMeasurement = ReuseMeasurement(
+            dimension: .grammarProductions,
+            reused: change.retainedProductionIDs.count,
+            rebuilt: change.addedProductionIDs.count,
+            removed: change.removedProductionIDs.count,
+            strategy: "structural-grammar-delta")
         guard artifactIdentity?.fingerprint == change.sourceFingerprint,
               artifact.fingerprint == change.targetFingerprint else {
             let oldIDs = Set(facts.keys)
@@ -168,14 +176,24 @@ public final class EarleyIncrementalChart<Value> {
                 ? IncrementalExecutionEvidence(
                     strategy: .fallback,
                     fallback: .incompatibleArtifact,
-                    measurements: [measurement])
+                    measurements: [measurement, grammarMeasurement])
                 : IncrementalExecutionEvidence(
                     strategy: .full,
-                    measurements: [measurement])
+                    measurements: [measurement, grammarMeasurement])
             return .init(
                 invalidation: .init(removed: oldIDs, retained: []),
                 evidence: evidence,
-                appliedIncrementally: false)
+                appliedIncrementally: false,
+                convergence: sourceArtifact.flatMap { source in
+                    guard source != artifact, evidence.strategy == .fallback else {
+                        return nil
+                    }
+                    return GrammarEngineTransition(
+                        engineID: "earley", sourceArtifact: source,
+                        targetArtifact: artifact, appliedIncrementally: false,
+                        requiresRetokenization: change.requiresRetokenization,
+                        evidence: evidence)
+                })
         }
 
         let invalidation = invalidate(
@@ -183,18 +201,21 @@ public final class EarleyIncrementalChart<Value> {
         artifactIdentity = artifact
         let chartEvidence = invalidation.executionEvidence(
             rebuiltFactCount: rebuiltFactCount)
-        let grammarMeasurement = ReuseMeasurement(
-            dimension: .grammarProductions,
-            reused: change.retainedProductionIDs.count,
-            rebuilt: change.addedProductionIDs.count,
-            removed: change.removedProductionIDs.count,
-            strategy: "structural-grammar-delta")
+        let evidence = IncrementalExecutionEvidence(
+            strategy: .incremental,
+            measurements: chartEvidence.measurements + [grammarMeasurement])
         return .init(
             invalidation: invalidation,
-            evidence: .init(
-                strategy: .incremental,
-                measurements: chartEvidence.measurements + [grammarMeasurement]),
-            appliedIncrementally: true)
+            evidence: evidence,
+            appliedIncrementally: true,
+            convergence: sourceArtifact.flatMap { source in
+                guard source != artifact else { return nil }
+                return GrammarEngineTransition(
+                    engineID: "earley", sourceArtifact: source,
+                    targetArtifact: artifact, appliedIncrementally: true,
+                    requiresRetokenization: change.requiresRetokenization,
+                    evidence: evidence)
+            })
     }
 
     private func invalidate(

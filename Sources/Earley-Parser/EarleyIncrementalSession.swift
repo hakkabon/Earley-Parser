@@ -15,7 +15,7 @@ public final class EarleyIncrementalSession: @unchecked Sendable {
         let identity: EarleyTokenIdentity
     }
 
-    private let parser: EarleyParser
+    private var parser: EarleyParser
     private let lock = NSLock()
     private let chart = EarleyIncrementalChart<ParseStateItem>()
     private var tokens: [Token] = []
@@ -66,7 +66,9 @@ public final class EarleyIncrementalSession: @unchecked Sendable {
 
         let nextTokens = makeTokens(
             terminals: terminals, suppliedIdentities: suppliedIdentities)
-        let reusablePrefix = hasBaseline ? commonPrefix(tokens, nextTokens) : 0
+        let reusablePrefix = hasBaseline
+            ? min(commonPrefix(tokens, nextTokens), max(0, states.count - 1))
+            : 0
         let previousTokenCount = tokens.count
         let previousColumnCount = states.count
         let previousFactCount = chart.count
@@ -183,6 +185,44 @@ public final class EarleyIncrementalSession: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         discardBaseline()
+    }
+
+    /// Activates a verified grammar delta without replacing the document
+    /// session. Columns containing invalidated productions and every later
+    /// column are replayed; an unrelated prefix remains native Earley state.
+    @discardableResult
+    public func transition(
+        to grammar: Grammar,
+        change: GrammarChangeSet
+    ) -> EarleyGrammarTransition {
+        lock.lock()
+        defer { lock.unlock() }
+        let nextParser = EarleyParser(grammar: grammar)
+        let transition = chart.transition(
+            to: nextParser.incrementalArtifactIdentity, change: change)
+        parser = nextParser
+
+        if change.requiresRetokenization || !transition.appliedIncrementally {
+            tokens = []
+            states = []
+            bsrByColumn = []
+            hasBaseline = false
+            return transition
+        }
+        let invalid = change.invalidatedProductionIDSet
+        if let firstInvalid = states.firstIndex(where: { column in
+            column.contains {
+                invalid.contains(GrammarProductionID($0.production))
+            }
+        }) {
+            states = Array(states.prefix(firstInvalid))
+            bsrByColumn = Array(bsrByColumn.prefix(firstInvalid))
+        }
+        if states.isEmpty {
+            tokens = []
+            hasBaseline = false
+        }
+        return transition
     }
 
     private func discardBaseline() {

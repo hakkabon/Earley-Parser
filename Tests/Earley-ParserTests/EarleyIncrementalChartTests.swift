@@ -59,6 +59,24 @@ final class EarleyIncrementalChartTests: XCTestCase {
         XCTAssertEqual(restarted.reusedChartColumnCount, 0)
     }
 
+    func testLiveSessionActivatesUnrelatedGrammarChangeInPlace() throws {
+        let old = try Grammar(bnf: "S ::= 'a' 'b'; U ::= 'u'", start: "S")
+        let changed = try Grammar(
+            bnf: "S ::= 'a' 'b'; U ::= 'u' | 'v'", start: "S")
+        let session = EarleyIncrementalSession(grammar: old)
+        _ = try session.parse("a b")
+
+        let transition = session.transition(
+            to: changed, change: old.changeSet(to: changed))
+        let result = try session.parse("a b")
+        let clean = try EarleyParser(grammar: changed).parse("a b")
+
+        XCTAssertTrue(transition.appliedIncrementally)
+        XCTAssertEqual(transition.convergence?.engineID, "earley")
+        XCTAssertGreaterThan(result.reusedChartColumnCount, 0)
+        XCTAssertEqual(result.result.bsr, clean.bsr)
+    }
+
     func testTokenInvalidationPropagatesOnlyThroughDependentChartFacts() {
         let chart = EarleyIncrementalChart<String>()
         let left = EarleyChartFactID("scan:left")
@@ -201,6 +219,7 @@ final class EarleyIncrementalChartTests: XCTestCase {
         XCTAssertEqual(transition.invalidation.removed, [root, bFact])
         XCTAssertEqual(transition.invalidation.retained, [unrelated])
         XCTAssertEqual(transition.evidence.strategy, .incremental)
+        XCTAssertEqual(transition.convergence?.engineID, "earley")
         XCTAssertEqual(transition.evidence.measurements.first?.reused, 1)
     }
 
